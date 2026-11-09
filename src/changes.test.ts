@@ -143,6 +143,12 @@ test('commands by stage: Finish once the work is in, and from 80% of the tasks i
   assert.deepEqual(same.commands, [{ name: 'apply', text: '/work PROJ-7' }])
 })
 
+test('plain OpenSpec: the default Finish needs no ticket and ends in the archive command', () => {
+  const { commands } = commandsOf('merged', { done: 1, total: 2 }, DEFAULT_CONFIG, 'add-dark-mode', null)
+  assert.equal(commands.length, 1)
+  assert.ok(commands[0].text.includes('/opsx:archive add-dark-mode'))
+})
+
 test('change files: every markdown file, main ones first, excluded folders never walked', async () => {
   const dir = `${ROOT}/changes/proj-7-dark-mode`
   const files = fakeFiles({

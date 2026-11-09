@@ -29,7 +29,8 @@ export const DEFAULT_CONFIG: BoardConfig = {
   ticket: null,
   pullRequests: null,
   apply: '/opsx:apply {change}',
-  finish: '/opsx:archive {change}',
+  finish:
+    'Check whether the OpenSpec change {change} is finished: compare openspec/changes/{change}/tasks.md with the code, the git history and its pull requests, and tick each task that is really done. If every task is done, run /opsx:archive {change}. Otherwise list what is left and stop without starting it.',
   agent: 'claude',
   applyAnywhere: false,
   exclude: []
@@ -137,7 +138,7 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
     if (typeof raw.finish === 'string' && raw.finish.trim() !== '') {
       config.finish = raw.finish
     } else {
-      problems.push('finish must be a non-empty command such as "/opsx:archive {change}"')
+      problems.push('finish must be a non-empty command or prompt, such as "/opsx:archive {change}"')
     }
   }
   if (raw.agent !== undefined) {

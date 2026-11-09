@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "openspec-board",
   "name": "OpenSpec Board",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "A read-only board of the OpenSpec changes in the focused workspace: stage, task progress, the resume line, the ticket and its pull requests. Apply and Finish send a command you choose to an agent of the change's own workspace, or start that workspace.",
   "license": "MIT",
   "engines": {
