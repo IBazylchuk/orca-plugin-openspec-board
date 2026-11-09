@@ -4,6 +4,7 @@ import {
   Button,
   Callout,
   Card,
+  Checkbox,
   Collapsible,
   EmptyState,
   Heading,
@@ -516,6 +517,7 @@ function TaskList({ change }: { change: ChangeRef }) {
             <Stack gap="xs">
               {section.tasks.map((task, taskIndex) => (
                 <Row key={taskIndex} gap="xs" align="start">
+                  <Checkbox label={task.text} checked={task.done} disabled={task.done} />
                   {runnable && !task.done ? (
                     <IconButton
                       icon="play"
@@ -526,12 +528,7 @@ function TaskList({ change }: { change: ChangeRef }) {
                       disabled={blocker !== null}
                       onPress={() => runTask(change, task.text)}
                     />
-                  ) : (
-                    <Badge tone={task.done ? 'success' : 'neutral'}>{task.done ? 'done' : 'open'}</Badge>
-                  )}
-                  <Text size="sm" muted={task.done}>
-                    {task.text}
-                  </Text>
+                  ) : null}
                 </Row>
               ))}
             </Stack>

@@ -218,7 +218,8 @@ test('opening a change shows its task list, then its files, and goes back to the
   const applied: unknown[] = []
   const view = await mount(panel, { host: hostWith(applied) })
   await view.press(view.findAll({ text: 'Open' })[0])
-  assert.ok(view.find({ text: '1.2 wire it' }))
+  assert.equal(view.find({ label: '1.1 store the flag' })?.props.checked, true)
+  assert.equal(view.find({ label: '1.2 wire it' })?.props.checked, false)
   assert.equal(view.find({ type: 'Collapsible' })?.props.description, '1 of 2 done')
   assert.equal(view.find({ label: 'Run 1.1 store the flag' }), null)
   await view.press({ label: 'Run 1.2 wire it' })
