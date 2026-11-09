@@ -27,8 +27,13 @@ export interface ChangeCard {
   resume: string | null
   ticket: Ticket | null
   pullRequests: PullRequest[] | null
-  applicable: boolean
+  apply: ApplyTarget
 }
+
+export type ApplyTarget =
+  | { kind: 'here' }
+  | { kind: 'elsewhere'; workspaceId: string; workspaceName: string }
+  | { kind: 'none'; reason: string | null }
 
 export interface BoardSnapshot {
   workspaceId: string | null
@@ -52,5 +57,6 @@ declare module 'orca' {
       input: ChangeRef & { terminalId: string }
       output: { sent: boolean; message: string }
     }
+    'workspace.go': { input: { workspaceId: string }; output: { opened: boolean; message: string } }
   }
 }

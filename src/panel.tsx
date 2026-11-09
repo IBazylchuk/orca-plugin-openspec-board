@@ -76,7 +76,7 @@ async function load(fresh = false): Promise<void> {
 }
 
 const LEADING_STATUS_GLYPHS = /^[^\p{L}\p{N}]+/u
-const TRAILING_STATE = /:\s*(working|done|waiting|blocked|idle)\b.*$/i
+const TRAILING_STATE = /:\s*(working|done|waiting|blocked|idle|needs\s+\w+)\b.*$/i
 
 export const cleanTitle = (title: string | null | undefined): string =>
   (title ?? '').replace(LEADING_STATUS_GLYPHS, '').replace(TRAILING_STATE, '').trim()
@@ -239,6 +239,28 @@ function PullRequests({ change }: { change: ChangeCard }) {
   )
 }
 
+async function goTo(workspaceId: string): Promise<void> {
+  try {
+    set(notice, (await plugin.request('workspace.go', { workspaceId }, REQUEST)).message)
+  } catch (error) {
+    set(notice, messageOf(error))
+  }
+}
+
+function GoToWorkspace({ workspaceId, name }: { workspaceId: string; name: string }) {
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      icon="next"
+      tooltip={`Apply runs in this change's own workspace, ${name}`}
+      onPress={() => goTo(workspaceId)}
+    >
+      {`Go to ${name}`}
+    </Button>
+  )
+}
+
 function ChangeItem({ workspaceId, change }: { workspaceId: string; change: ChangeCard }) {
   const ref = { workspaceId, change: change.name }
   const progress = change.tasks.total > 0 ? Math.round((change.tasks.done / change.tasks.total) * 100) : 0
@@ -261,7 +283,7 @@ function ChangeItem({ workspaceId, change }: { workspaceId: string; change: Chan
           <Button size="sm" variant="outline" icon="file-text" onPress={() => open(ref)}>
             Open
           </Button>
-          {change.applicable ? (
+          {change.apply.kind === 'here' ? (
             <Button
               size="sm"
               icon="play"
@@ -272,7 +294,13 @@ function ChangeItem({ workspaceId, change }: { workspaceId: string; change: Chan
               Apply
             </Button>
           ) : null}
+          {change.apply.kind === 'elsewhere' ? (
+            <GoToWorkspace workspaceId={change.apply.workspaceId} name={change.apply.workspaceName} />
+          ) : null}
         </Row>
+        {change.apply.kind === 'none' && change.apply.reason ? (
+          <Text muted size="xs">{change.apply.reason}</Text>
+        ) : null}
       </Stack>
     </Card>
   )

@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "openspec-board",
   "name": "OpenSpec Board",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A read-only board of the OpenSpec changes in the focused workspace: stage, task progress, the resume line, the ticket and its pull requests. Apply types a command you choose into a running agent.",
   "license": "MIT",
   "engines": {
@@ -24,6 +24,7 @@
   },
   "capabilities": [
     { "kind": "workspace:read" },
+    { "kind": "workspace:write" },
     { "kind": "agent:read" },
     { "kind": "terminal:send" }
   ]

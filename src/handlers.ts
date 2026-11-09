@@ -1,7 +1,8 @@
 import type { OrcaWorkerApi } from 'orca/worker'
 import { applyText } from './apply'
+import { placeApply, type PlacedWorkspace } from './apply-target'
 import { CONFIG_FILE, parseConfig, type BoardConfig } from './config'
-import { isApplicable, listChangeFiles, listChanges, readCard, ticketOf, type Files } from './changes'
+import { listChangeFiles, listChanges, readCard, ticketOf, type Files } from './changes'
 import { pullRequestFinder, type Runner } from './pull-requests'
 import type { BoardSnapshot, ChangeCard, ChangeRef, PullRequest } from './protocol'
 
@@ -9,16 +10,14 @@ export interface Io extends Files {
   run: Runner
 }
 
-interface Workspace {
-  id: string
-  name: string
+interface Workspace extends PlacedWorkspace {
   path: string
-  branch: string | null
   hostId: string | null
 }
 
 interface Located {
   workspace: Workspace
+  others: Workspace[]
   root: string
   config: BoardConfig
   problems: string[]
@@ -60,7 +59,8 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     }
     const root = `${focused.path}/${OPENSPEC}`
     const { config, problems } = parseConfig(await io.text(`${root}/${CONFIG_FILE}`))
-    return { workspace: focused, root, config, problems }
+    const others = workspaces.filter((w) => w.id !== focused.id && isLocal(w))
+    return { workspace: focused, others, root, config, problems }
   }
 
   async function lookUp(located: Located, names: string[], fresh: boolean): Promise<Map<string, PullRequest[] | null>> {
@@ -87,9 +87,13 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
       }
     }
     const pullRequests = await lookUp(located, names, fresh)
-    const changes = await Promise.all(
+    const read = await Promise.all(
       names.map((name) => readCard(io, located.root, name, located.config, pullRequests.get(name) ?? null))
     )
+    const changes = read.map((card) => ({
+      ...card,
+      apply: placeApply(card, located.workspace, located.others, located.config.applyAnywhere)
+    }))
     current = { located, changes }
     return { workspaceId: located.workspace.id, changes, problems: located.problems, checkedAt: Date.now() }
   }
@@ -129,15 +133,15 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     }
     await orca.host.call('editor.open', {
       workspaceId: file.located.workspace.id,
-      path: `${file.located.root}/${file.path}`
+      path: `${OPENSPEC}/${file.path}`
     })
     return { opened: true, message: `Opened ${ref.path}` }
   })
 
   orca.panels.handle('change.apply', async ({ workspaceId, change, terminalId }) => {
     const found = listed({ workspaceId, change })
-    if (!found || !isApplicable(found.card.stage)) {
-      return { sent: false, message: 'That change cannot be applied from here' }
+    if (!found || found.card.apply.kind !== 'here') {
+      return { sent: false, message: 'That change is applied in its own workspace, not from here' }
     }
     const { agents } = await orca.host.call('agents.list')
     if (!agents.some((agent) => agent.terminalId === terminalId)) {
@@ -149,5 +153,16 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     }
     const { accepted } = await orca.host.call('terminal.sendText', { terminalId, text: built.text, enter: true })
     return { sent: accepted, message: accepted ? `Sent ${built.text}` : 'Orca did not accept the text' }
+  })
+
+  orca.panels.handle('workspace.go', async ({ workspaceId }) => {
+    const target = current?.changes
+      .map((card) => card.apply)
+      .find((apply) => apply.kind === 'elsewhere' && apply.workspaceId === workspaceId)
+    if (!target || target.kind !== 'elsewhere') {
+      return { opened: false, message: 'That workspace is not the own workspace of a listed change' }
+    }
+    await orca.host.call('workspace.open', { workspaceId })
+    return { opened: true, message: `Opened ${target.workspaceName}` }
   })
 }

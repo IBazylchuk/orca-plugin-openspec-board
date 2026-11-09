@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { CACHE_MS, mentionsTicket, parseSearch, pullRequestFinder, pullRequestsOf, TICKETS_PER_SEARCH } from './pull-requests'
+import { CACHE_MS, mentionsKey as mentionsTicket, parseSearch, pullRequestFinder, pullRequestsOf, TICKETS_PER_SEARCH } from './pull-requests'
 
 const row = (number: number, title: string, state = 'open') => ({
   number,

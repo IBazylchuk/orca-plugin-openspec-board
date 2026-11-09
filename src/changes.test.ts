@@ -70,7 +70,7 @@ test('configured project: resume line, ticket and stage by pull requests', async
   assert.equal(card.stage, 'in-review')
   assert.equal(card.resume, 'wire the toggle')
   assert.deepEqual(card.ticket, { key: 'PROJ-7', url: 'https://tracker.example.com/browse/PROJ-7' })
-  assert.equal(card.applicable, true)
+  assert.deepEqual(card.apply, { kind: 'here' })
 })
 
 test('a change without a ticket cannot be applied when the command needs one', async () => {
@@ -78,7 +78,7 @@ test('a change without a ticket cannot be applied when the command needs one', a
   const files = fakeFiles({ [`${dir}/proposal.md`]: '', [`${dir}/design.md`]: '', [`${dir}/tasks.md`]: '- [ ] one\n' })
   const card = await readCard(files, ROOT, 'tidy-up', { ...ours, apply: '/work {ticket}' }, null)
   assert.equal(card.stage, 'ready')
-  assert.equal(card.applicable, false)
+  assert.equal(card.apply.kind, 'none')
 })
 
 test('stage table', () => {

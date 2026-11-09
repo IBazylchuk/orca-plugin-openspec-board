@@ -18,6 +18,7 @@ export interface BoardConfig {
   ticket: TicketRule | null
   pullRequests: PullRequestRule | null
   apply: string
+  applyAnywhere: boolean
   exclude: string[]
 }
 
@@ -30,6 +31,7 @@ export const DEFAULT_CONFIG: BoardConfig = {
   ticket: null,
   pullRequests: null,
   apply: '/opsx:apply {change}',
+  applyAnywhere: false,
   exclude: []
 }
 
@@ -132,6 +134,13 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
       config.apply = raw.apply
     } else {
       problems.push('apply must be a non-empty command such as "/opsx:apply {change}"')
+    }
+  }
+  if (raw.applyAnywhere !== undefined) {
+    if (typeof raw.applyAnywhere === 'boolean') {
+      config.applyAnywhere = raw.applyAnywhere
+    } else {
+      problems.push('applyAnywhere must be true or false')
     }
   }
   if (raw.files !== undefined) {

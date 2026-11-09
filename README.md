@@ -11,7 +11,9 @@ describe that in one file, `openspec/board.json`, and the board follows it.
 ## Install
 
 In Orca, install the plugin from this repository's Git URL, then approve the access it
-asks for: read the focused workspace, read the agent list, send text to a terminal.
+asks for: read the focused workspace, read the agent list, send text to a terminal, and
+open workspaces and files in Orca (for "Open in editor" and "Go to"). Without a version
+Orca installs the newest `vX.Y.Z` tag.
 
 The worker runs as a trusted Orca worker, with your account's access to the machine.
 It only reads files under `openspec/changes`, runs `gh search prs` when you configure
@@ -57,6 +59,7 @@ Archived changes are not shown.
 | `ticket` | none | `pattern` matched against the change folder name, `key` built from its groups, optional `url` with `{ticket}` |
 | `pullRequests` | off | `gh search prs --owner <owner>` with `search`, where `{ticket}` becomes up to six tickets joined by `OR`. Only pull requests whose title names the ticket count. Results are kept five minutes, and kept as they were when a search fails. GitHub allows 30 searches a minute per account, shared with your other `gh` use. Needs `gh` signed in |
 | `apply` | `/opsx:apply {change}` | What Apply types; `{change}` and `{ticket}` are replaced |
+| `applyAnywhere` | `false` | `true` lets Apply send any change to an agent of whatever workspace is focused, instead of only from the change's own workspace |
 | `files.exclude` | none | Folders inside a change that the file list never walks, such as raw research output |
 
 Problems in the file show at the top of the board, and the default is used for the
@@ -64,10 +67,21 @@ broken key.
 
 ## Apply
 
-Pick an agent terminal of the focused workspace and press Apply on a change that is
-not in Planning or Complete. The command is typed and Enter is pressed. A change or
+A change is applied in its own workspace: the Orca workspace whose name or branch
+contains the change's ticket key or its folder name, as a whole word (`PROJ-7`, or a
+branch `feature/add-dark-mode`). The agents of one workspace work on one change, so
+the board never types another change into them.
+
+| Where you are | What the card offers |
+|---|---|
+| The change's own workspace | Apply, sent to the agent you pick |
+| Another workspace, and the change has its own | Go to that workspace |
+| Another workspace, and the change has none | A note to create a workspace named after it |
+
+Apply types the command and presses Enter. It waits while the chosen agent is busy or
+asks for your approval, so the command never lands in the middle of a run. A change or
 ticket name with a control character is refused, so a hostile folder name cannot
-submit a second line.
+submit a second line. Planning and Complete changes have no Apply.
 
 ## Develop
 

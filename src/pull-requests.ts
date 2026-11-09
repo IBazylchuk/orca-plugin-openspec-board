@@ -19,8 +19,8 @@ interface Found {
 
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-export function mentionsTicket(title: string, ticket: string): boolean {
-  return new RegExp(`(^|[^A-Za-z0-9])${escape(ticket)}(?![0-9A-Za-z])`, 'i').test(title)
+export function mentionsKey(text: string, key: string): boolean {
+  return new RegExp(`(^|[^A-Za-z0-9])${escape(key)}(?![0-9A-Za-z])`, 'i').test(text)
 }
 
 export function parseSearch(json: string): PullRequest[] | null {
@@ -53,7 +53,7 @@ export function parseSearch(json: string): PullRequest[] | null {
 
 export function pullRequestsOf(found: PullRequest[], ticket: string): PullRequest[] {
   return found
-    .filter((pr) => mentionsTicket(pr.title, ticket))
+    .filter((pr) => mentionsKey(pr.title, ticket))
     .sort((a, b) => a.repository.localeCompare(b.repository) || a.number - b.number)
 }
 

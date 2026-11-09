@@ -24,7 +24,7 @@ const BOARD: BoardSnapshot = {
           url: 'https://github.com/example-org/app/pull/3'
         }
       ],
-      applicable: true
+      apply: { kind: 'here' }
     },
     {
       name: 'proj-8-sketch',
@@ -34,7 +34,27 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-8', url: null },
       pullRequests: null,
-      applicable: false
+      apply: { kind: 'none', reason: null }
+    },
+    {
+      name: 'proj-9-api',
+      stage: 'ready',
+      missing: [],
+      tasks: { done: 0, total: 1 },
+      resume: null,
+      ticket: { key: 'PROJ-9', url: null },
+      pullRequests: null,
+      apply: { kind: 'elsewhere', workspaceId: 'w2', workspaceName: 'PROJ-9' }
+    },
+    {
+      name: 'proj-5-old',
+      stage: 'ready',
+      missing: [],
+      tasks: { done: 0, total: 1 },
+      resume: null,
+      ticket: { key: 'PROJ-5', url: null },
+      pullRequests: null,
+      apply: { kind: 'none', reason: "Apply runs in the change's own workspace: create one named PROJ-5 in Orca" }
     }
   ]
 }
@@ -58,6 +78,10 @@ function hostWith(applied: unknown[], state = 'waiting') {
       'change.apply': (input) => {
         applied.push(input)
         return { sent: true, message: 'Sent /work PROJ-7' }
+      },
+      'workspace.go': (input) => {
+        applied.push(input)
+        return { opened: true, message: 'Opened PROJ-9' }
       }
     }
   })
@@ -87,6 +111,17 @@ test('apply goes to the only agent; a planning change has no Apply', async () =>
   await view.unmount()
 })
 
+test('a change of another task offers its own workspace, never Apply here', async () => {
+  const applied: unknown[] = []
+  const view = await mount(panel, { host: hostWith(applied) })
+  assert.equal(view.findAll({ text: 'Apply' }).length, 1)
+  assert.ok(view.find({ text: /create one named PROJ-5 in Orca/ }))
+  await view.press({ text: 'Go to PROJ-9' })
+  assert.deepEqual(applied, [{ workspaceId: 'w2' }])
+  assert.ok(view.find({ text: 'Opened PROJ-9' }))
+  await view.unmount()
+})
+
 test('the agent is named by its kind, its state and its own title without the status parts', async () => {
   const view = await mount(panel, { host: hostWith([]) })
   const picker = view.find({ label: 'Apply sends the command to an agent of "PROJ-7"' })
@@ -96,6 +131,7 @@ test('the agent is named by its kind, its state and its own title without the st
 
 test('status glyphs and a trailing state are cut from an agent title', () => {
   assert.equal(panel.cleanTitle('⚪ claude: done'), 'claude')
+  assert.equal(panel.cleanTitle('⚪ app: needs approval'), 'app')
   assert.equal(panel.cleanTitle('✳ working'), 'working')
   assert.equal(panel.cleanTitle(null), '')
 })

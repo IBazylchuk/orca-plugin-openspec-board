@@ -1,6 +1,6 @@
 import { applyText } from './apply'
 import type { BoardConfig } from './config'
-import type { ChangeCard, Count, PullRequest, Stage, Ticket } from './protocol'
+import type { ApplyTarget, ChangeCard, Count, PullRequest, Stage, Ticket } from './protocol'
 
 export interface Entry {
   name: string
@@ -127,8 +127,16 @@ export async function readCard(
     resume: resumeLine(tasksText, config.resumeLine),
     ticket,
     pullRequests,
-    applicable: isApplicable(stage) && 'text' in applyText(config.apply, name, ticket)
+    apply: applyBase(stage, config.apply, name, ticket)
   }
+}
+
+function applyBase(stage: Stage, template: string, name: string, ticket: Ticket | null): ApplyTarget {
+  if (!isApplicable(stage)) {
+    return { kind: 'none', reason: null }
+  }
+  const built = applyText(template, name, ticket)
+  return 'refused' in built ? { kind: 'none', reason: built.refused } : { kind: 'here' }
 }
 
 const FIRST_FILES = ['proposal.md', 'design.md', 'tasks.md']
