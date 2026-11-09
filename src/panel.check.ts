@@ -28,6 +28,7 @@ const DEMO_CHANGES: ChangeCard[] = [
     ticket: ticket('NOTE-31'),
     pullRequests: null,
     pullRequestsUnknown: false,
+    inThisWorkspace: false,
     commands: [],
     place: { kind: 'none', reason: null }
   },
@@ -40,6 +41,7 @@ const DEMO_CHANGES: ChangeCard[] = [
     ticket: ticket('NOTE-27'),
     pullRequests: [],
     pullRequestsUnknown: false,
+    inThisWorkspace: false,
     commands: [apply('NOTE-27')],
     place: { kind: 'new', workspaceName: 'NOTE-27' }
   },
@@ -52,6 +54,7 @@ const DEMO_CHANGES: ChangeCard[] = [
     ticket: ticket('NOTE-42'),
     pullRequests: [pr(118, 'merged', 'NOTE-42: local change queue')],
     pullRequestsUnknown: false,
+    inThisWorkspace: true,
     commands: [apply('NOTE-42')],
     place: { kind: 'here' }
   },
@@ -64,6 +67,7 @@ const DEMO_CHANGES: ChangeCard[] = [
     ticket: ticket('NOTE-19'),
     pullRequests: [],
     pullRequestsUnknown: false,
+    inThisWorkspace: false,
     commands: [apply('NOTE-19')],
     place: { kind: 'elsewhere', workspaceId: 'w-19', workspaceName: 'NOTE-19' }
   },
@@ -76,6 +80,7 @@ const DEMO_CHANGES: ChangeCard[] = [
     ticket: ticket('NOTE-36'),
     pullRequests: [pr(124, 'open', 'NOTE-36: dark theme tokens'), pr(121, 'merged', 'NOTE-36: theme switcher')],
     pullRequestsUnknown: false,
+    inThisWorkspace: false,
     commands: [apply('NOTE-36'), finish('NOTE-36')],
     place: { kind: 'elsewhere', workspaceId: 'w-36', workspaceName: 'NOTE-36' }
   },
@@ -88,6 +93,7 @@ const DEMO_CHANGES: ChangeCard[] = [
     ticket: ticket('NOTE-12'),
     pullRequests: [pr(97, 'merged', 'NOTE-12: search index'), pr(103, 'merged', 'NOTE-12: reindex job')],
     pullRequestsUnknown: false,
+    inThisWorkspace: false,
     commands: [finish('NOTE-12')],
     place: { kind: 'new', workspaceName: 'NOTE-12' }
   },
@@ -100,6 +106,7 @@ const DEMO_CHANGES: ChangeCard[] = [
     ticket: ticket('NOTE-8'),
     pullRequests: [pr(88, 'merged', 'NOTE-8: markdown tables')],
     pullRequestsUnknown: false,
+    inThisWorkspace: false,
     commands: [finish('NOTE-8')],
     place: { kind: 'new', workspaceName: 'NOTE-8' }
   }
@@ -144,7 +151,16 @@ const demo = {
   }
 }
 
-const showing = (stage: string) => ({ ...demo, persisted: { workspace: { stage, agent: 't1' } } })
+const UNPINNED_BOARD: BoardSnapshot = {
+  ...DEMO_BOARD,
+  changes: DEMO_CHANGES.map((change) => ({ ...change, inThisWorkspace: false }))
+}
+
+const showing = (stage: string) => ({
+  ...demo,
+  requests: { ...demo.requests, 'board.get': () => UNPINNED_BOARD },
+  persisted: { workspace: { stage, agent: 't1' } }
+})
 
 export default defineCheck({
   noFocusedWorkspace: {},

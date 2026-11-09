@@ -24,8 +24,12 @@ tracker to keep in sync.
 - **Stages from real signals**: Planning, Ready, In progress, In review, Merged with
   open tasks, Complete, worked out from the artifacts, the ticked tasks in `tasks.md`
   and the change's pull requests.
+- **This workspace first**: the change the focused Orca workspace works on is pinned at
+  the top.
 - **Stage filter**: buttons at the top count the changes in each stage and show one
   stage at a time.
+- **Live**: the board redraws when a file under `openspec/changes` changes, an agent
+  stops, or you switch workspaces.
 - **Next step**: the `Next:` paragraph of `tasks.md`, so you resume where the last
   session stopped.
 - **Tickets**: a link to the ticket for each change, from a pattern on the folder name
@@ -35,8 +39,10 @@ tracker to keep in sync.
 - **Apply and Finish**: send `/opsx:apply`, a check-then-`/opsx:archive`, or any command
   you configure to a Claude Code, Codex or other agent, only in the change's own Orca
   workspace, or create that workspace with an agent already working.
-- **Read the change**: proposal, design, tasks and specs rendered in the panel, one
-  click to open them in Orca's editor.
+- **Task list**: each change opens on its `tasks.md` as a checklist, one collapsible
+  section per heading with its done count; finished sections start folded.
+- **Read the change**: proposal, design and specs rendered in the panel, one click to
+  open them in Orca's editor.
 - **One config file**: `openspec/board.json` describes how your team runs OpenSpec;
   without it the board behaves like plain OpenSpec.
 - **Read-only**: it never writes a file in your repository.

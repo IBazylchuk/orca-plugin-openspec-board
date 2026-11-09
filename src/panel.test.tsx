@@ -25,6 +25,7 @@ const BOARD: BoardSnapshot = {
         }
       ],
       pullRequestsUnknown: false,
+      inThisWorkspace: true,
       commands: [{ name: 'apply', text: '/work PROJ-7' }],
       place: { kind: 'here' }
     },
@@ -37,6 +38,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-8', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      inThisWorkspace: false,
       commands: [],
       place: { kind: 'none', reason: null }
     },
@@ -49,6 +51,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-9', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      inThisWorkspace: false,
       commands: [{ name: 'apply', text: '/work PROJ-9' }],
       place: { kind: 'elsewhere', workspaceId: 'w2', workspaceName: 'PROJ-9' }
     },
@@ -61,6 +64,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-5', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      inThisWorkspace: false,
       commands: [{ name: 'apply', text: '/work PROJ-5' }],
       place: { kind: 'none', reason: "Runs in the change's own workspace: create one named PROJ-5 in Orca" }
     },
@@ -73,6 +77,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-4', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      inThisWorkspace: false,
       commands: [{ name: 'finish', text: '/close PROJ-4' }],
       place: { kind: 'new', workspaceName: 'PROJ-4' }
     }
@@ -95,6 +100,9 @@ function hostWith(applied: unknown[], state = 'waiting') {
       'board.get': () => BOARD,
       'change.files': () => ({ files: ['proposal.md', 'tasks.md'], truncated: false }),
       'change.read': ({ path }) => ({ text: `# ${path}` }),
+      'change.tasks': () => ({
+        sections: [{ title: '1. Toggle', tasks: [{ text: '1.1 store the flag', done: true }, { text: '1.2 wire it', done: false }] }]
+      }),
       'change.run': (input) => {
         applied.push(input)
         return { sent: true, message: 'Sent /work PROJ-7' }
@@ -113,7 +121,7 @@ function hostWith(applied: unknown[], state = 'waiting') {
 
 test('the board groups changes by stage and shows the resume line, ticket and pull requests', async () => {
   const view = await mount(panel, { host: hostWith([]) })
-  assert.ok(view.find({ text: 'In review' }))
+  assert.ok(view.find({ text: 'This workspace' }))
   assert.ok(view.find({ text: 'Planning' }))
   assert.ok(view.find({ text: 'Next: wire the toggle' }))
   assert.ok(view.find({ text: 'PROJ-7' }))
@@ -162,9 +170,10 @@ test('stage buttons count the changes and show one stage at a time', async () =>
   assert.ok(view.find({ text: 'All 5' }))
   await view.press({ text: 'Ready 2' })
   assert.ok(view.find({ text: 'PROJ-9' }))
-  assert.equal(view.find({ text: 'PROJ-7' }), null)
-  await view.press({ text: 'Ready 2' })
+  assert.equal(view.find({ text: 'PROJ-8' }), null)
   assert.ok(view.find({ text: 'PROJ-7' }))
+  await view.press({ text: 'Ready 2' })
+  assert.ok(view.find({ text: 'PROJ-8' }))
   await view.unmount()
 })
 
@@ -194,13 +203,23 @@ test('Apply is disabled while the agent is busy or waits for an approval', async
   }
 })
 
-test('opening a change shows its first file and goes back to the board', async () => {
+test('the change of this workspace is pinned on top', async () => {
+  const view = await mount(panel, { host: hostWith([]) })
+  const headings = view.findAll({ type: 'Heading' }).map((heading) => heading.text)
+  assert.equal(headings.indexOf('This workspace'), 1)
+  await view.unmount()
+})
+
+test('opening a change shows its task list, then its files, and goes back to the board', async () => {
   const view = await mount(panel, { host: hostWith([]) })
   await view.press(view.findAll({ text: 'Open' })[0])
+  assert.ok(view.find({ text: '1.2 wire it' }))
+  assert.equal(view.find({ type: 'Collapsible' })?.props.description, '1 of 2 done')
+  await view.select({ label: 'Change' }, 'files')
   assert.equal(view.find({ label: 'File' })?.props.value, 'proposal.md')
   assert.equal(view.find({ type: 'Markdown' })?.props.content, '# proposal.md')
   await view.press({ text: 'Back to board' })
-  assert.ok(view.find({ text: 'In review' }))
+  assert.ok(view.find({ text: 'This workspace' }))
   assert.deepEqual(view.errors, [])
   await view.unmount()
 })

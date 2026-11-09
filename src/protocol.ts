@@ -35,6 +35,7 @@ export interface ChangeCard {
   ticket: Ticket | null
   pullRequests: PullRequest[] | null
   pullRequestsUnknown: boolean
+  inThisWorkspace: boolean
   commands: Command[]
   place: Place
 }
@@ -44,6 +45,16 @@ export type Place =
   | { kind: 'elsewhere'; workspaceId: string; workspaceName: string }
   | { kind: 'new'; workspaceName: string }
   | { kind: 'none'; reason: string | null }
+
+export interface TaskItem {
+  text: string
+  done: boolean
+}
+
+export interface TaskSection {
+  title: string
+  tasks: TaskItem[]
+}
 
 export interface BoardSnapshot {
   workspaceId: string | null
@@ -72,5 +83,9 @@ declare module 'orca' {
       output: { started: boolean; message: string }
     }
     'workspace.go': { input: { workspaceId: string }; output: { opened: boolean; message: string } }
+    'change.tasks': { input: ChangeRef; output: { sections: TaskSection[] | null } }
+  }
+  interface PluginPanelEvents {
+    'board.changed': { at: number }
   }
 }

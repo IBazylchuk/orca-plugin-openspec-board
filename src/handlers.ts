@@ -1,12 +1,13 @@
 import type { OrcaWorkerApi } from 'orca/worker'
 import { belongsTo, placeChange, type PlacedWorkspace } from './apply-target'
 import { CONFIG_FILE, parseConfig, type BoardConfig } from './config'
-import { listChangeFiles, listChanges, readCard, ticketOf, type Files } from './changes'
+import { listChangeFiles, listChanges, readCard, taskSections, ticketOf, type Files } from './changes'
 import { pullRequestFinder, type Runner } from './pull-requests'
 import type { BoardSnapshot, ChangeCard, ChangeRef, CommandName, PullRequest } from './protocol'
 
 export interface Io extends Files {
   run: Runner
+  watch(path: string, onChange: () => void): () => void
 }
 
 interface Workspace extends PlacedWorkspace {
@@ -54,9 +55,18 @@ function pickFocused(workspaces: Workspace[], branch: string, displayName: strin
     : 'Several workspaces match the focused one, so the board cannot tell which folder to read'
 }
 
-export function register(orca: OrcaWorkerApi, io: Io): void {
+export function register(orca: OrcaWorkerApi, io: Io): () => void {
   const findPullRequests = pullRequestFinder(io.run)
   let current: { located: Located; changes: ChangeCard[] } | null = null
+  let watched: { path: string; stop: () => void } | null = null
+
+  function watchChanges(path: string): void {
+    if (watched?.path === path) {
+      return
+    }
+    watched?.stop()
+    watched = { path, stop: io.watch(path, () => orca.panels.post('board.changed', { at: Date.now() })) }
+  }
 
   async function locate(): Promise<Located | string> {
     const context = await orca.host.call('workspace.readContext')
@@ -127,7 +137,14 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     const read = await Promise.all(
       names.map((name) => readCard(io, located.root, name, located.config, pullRequests.get(name) ?? null))
     )
-    const changes = await Promise.all(read.map(async (card) => ({ ...card, place: await place(located, card) })))
+    const changes = await Promise.all(
+      read.map(async (card) => ({
+        ...card,
+        inThisWorkspace: belongsTo(located.workspace, card),
+        place: await place(located, card)
+      }))
+    )
+    watchChanges(`${located.root}/changes`)
     current = { located, changes }
     return { workspaceId: located.workspace.id, changes, problems: located.problems, checkedAt: Date.now() }
   }
@@ -225,6 +242,12 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     return { started: true, message: `Created ${target.workspaceName}; ${found.located.config.agent} got ${chosen.text}` }
   })
 
+  orca.panels.handle('change.tasks', async (ref) => {
+    const found = listed(ref)
+    const text = found ? await io.text(`${found.located.root}/changes/${ref.change}/tasks.md`) : null
+    return { sections: text === null ? null : taskSections(text) }
+  })
+
   orca.panels.handle('workspace.go', async ({ workspaceId }) => {
     const target = current?.changes
       .map((card) => card.place)
@@ -235,4 +258,9 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     await orca.host.call('workspace.open', { workspaceId })
     return { opened: true, message: `Opened ${target.workspaceName}` }
   })
+
+  return () => {
+    watched?.stop()
+    watched = null
+  }
 }

@@ -4,6 +4,7 @@ import {
   Button,
   Callout,
   Card,
+  Collapsible,
   EmptyState,
   Heading,
   host,
@@ -18,11 +19,13 @@ import {
   set,
   Spinner,
   Stack,
+  Tab,
+  Tabs,
   Text,
   type PanelContext,
   type Tone
 } from 'orca'
-import type { BoardSnapshot, ChangeCard, ChangeRef, Command, CommandName, PullRequest, Stage } from './protocol'
+import type { BoardSnapshot, ChangeCard, ChangeRef, Command, CommandName, PullRequest, Stage, TaskSection } from './protocol'
 
 const REQUEST = { timeoutMs: 60_000 }
 
@@ -69,6 +72,8 @@ const opened = atom<ChangeRef | null>(null)
 const files = atom<{ files: string[]; truncated: boolean } | null>(null)
 const fileChoice = atom('')
 const fileText = atom<string | null>(null)
+const tasks = atom<TaskSection[] | null>(null)
+const view = atom<'tasks' | 'files'>('tasks')
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
@@ -134,14 +139,25 @@ async function choose(ref: ChangeRef, path: string): Promise<void> {
   }
 }
 
+async function loadTasks(ref: ChangeRef): Promise<void> {
+  try {
+    const { sections } = await plugin.request('change.tasks', ref, REQUEST)
+    set(tasks, sections ?? [])
+  } catch (error) {
+    set(notice, messageOf(error))
+  }
+}
+
 async function open(ref: ChangeRef): Promise<void> {
   set(opened, ref)
   set(files, null)
   set(fileChoice, '')
   set(fileText, null)
+  set(tasks, null)
+  set(view, 'tasks')
   set(notice, null)
   try {
-    const listed = await plugin.request('change.files', ref, REQUEST)
+    const [listed] = await Promise.all([plugin.request('change.files', ref, REQUEST), loadTasks(ref)])
     set(files, listed)
     if (listed.files[0]) {
       await choose(ref, listed.files[0])
@@ -183,6 +199,16 @@ export function setup(ctx: PanelContext): void {
   void load()
   void loadAgents()
   ctx.subscriptions.push(
+    plugin.on('board.changed', () => {
+      void load()
+      const change = read(opened)
+      if (change) {
+        void loadTasks(change)
+        if (read(fileChoice)) {
+          void choose(change, read(fileChoice))
+        }
+      }
+    }),
     on('workspace.changed', () => {
       set(opened, null)
       void load()
@@ -404,14 +430,24 @@ function Board({ board }: { board: BoardSnapshot }) {
     )
   }
   const chosen = read(stageFilter)
+  const pinned = board.changes.filter((change) => change.inThisWorkspace)
+  const rest = board.changes.filter((change) => !change.inThisWorkspace)
   const shown = STAGES.some(({ stage }) => stage === chosen && board.changes.some((change) => change.stage === stage))
     ? STAGES.filter(({ stage }) => stage === chosen)
     : STAGES
   return (
     <Stack gap="md">
+      {pinned.length > 0 ? (
+        <Stack gap="sm">
+          <Heading level={3}>This workspace</Heading>
+          {pinned.map((change) => (
+            <ChangeItem key={change.name} workspaceId={workspaceId} change={change} />
+          ))}
+        </Stack>
+      ) : null}
       <StageFilter changes={board.changes} />
       {shown.map(({ stage, title, tone }) => {
-        const changes = board.changes.filter((change) => change.stage === stage)
+        const changes = rest.filter((change) => change.stage === stage)
         return changes.length === 0 ? null : (
           <Stack key={stage} gap="sm">
             <Row gap="xs">
@@ -428,24 +464,51 @@ function Board({ board }: { board: BoardSnapshot }) {
   )
 }
 
-function FileView({ change }: { change: ChangeRef }) {
+const doneCount = (section: TaskSection): number => section.tasks.filter((task) => task.done).length
+
+function TaskList() {
+  const sections = read(tasks)
+  if (sections === null) {
+    return <Spinner label="Reading tasks.md" />
+  }
+  if (sections.length === 0) {
+    return <EmptyState icon="info" title="No tasks" description="tasks.md holds no checkbox list yet." />
+  }
+  return (
+    <Stack gap="sm">
+      {sections.map((section, index) => {
+        const done = doneCount(section)
+        const title = section.title || 'Tasks'
+        return (
+          <Collapsible
+            key={`${index}-${title}`}
+            title={title}
+            description={`${done} of ${section.tasks.length} done`}
+            defaultOpen={done < section.tasks.length}
+          >
+            <Stack gap="xs">
+              {section.tasks.map((task, taskIndex) => (
+                <Row key={taskIndex} gap="xs" align="start">
+                  <Badge tone={task.done ? 'success' : 'neutral'}>{task.done ? 'done' : 'open'}</Badge>
+                  <Text size="sm" muted={task.done}>
+                    {task.text}
+                  </Text>
+                </Row>
+              ))}
+            </Stack>
+          </Collapsible>
+        )
+      })}
+    </Stack>
+  )
+}
+
+function Files({ change }: { change: ChangeRef }) {
   const listed = read(files)
   const path = read(fileChoice)
   const text = read(fileText)
   return (
     <Stack gap="md">
-      <Row justify="between">
-        <Button variant="ghost" icon="close" onPress={() => set(opened, null)}>
-          Back to board
-        </Button>
-        {path ? (
-          <Button variant="outline" icon="edit" onPress={() => edit(change, path)}>
-            Open in editor
-          </Button>
-        ) : null}
-      </Row>
-      <Heading level={2}>{change.change}</Heading>
-      {read(notice) ? <Text muted>{read(notice)}</Text> : null}
       {listed === null ? (
         <Spinner label="Listing files" />
       ) : listed.files.length === 0 ? (
@@ -461,6 +524,40 @@ function FileView({ change }: { change: ChangeRef }) {
       {listed?.truncated ? <Text muted size="xs">Only the first files are listed.</Text> : null}
       {path && text === null ? <Spinner label="Reading the file" /> : null}
       {text !== null ? <Markdown content={text} /> : null}
+    </Stack>
+  )
+}
+
+function FileView({ change }: { change: ChangeRef }) {
+  const path = read(fileChoice)
+  const showing = read(view)
+  return (
+    <Stack gap="md">
+      <Row justify="between">
+        <Button variant="ghost" icon="close" onPress={() => set(opened, null)}>
+          Back to board
+        </Button>
+        {showing === 'files' && path ? (
+          <Button variant="outline" icon="edit" onPress={() => edit(change, path)}>
+            Open in editor
+          </Button>
+        ) : null}
+        {showing === 'tasks' ? (
+          <Button variant="outline" icon="edit" onPress={() => edit(change, 'tasks.md')}>
+            Open in editor
+          </Button>
+        ) : null}
+      </Row>
+      <Heading level={2}>{change.change}</Heading>
+      {read(notice) ? <Text muted>{read(notice)}</Text> : null}
+      <Tabs label="Change" value={showing} onChange={(value) => set(view, value === 'files' ? 'files' : 'tasks')}>
+        <Tab value="tasks" label="Tasks" icon="check">
+          <TaskList />
+        </Tab>
+        <Tab value="files" label="Files" icon="file-text">
+          <Files change={change} />
+        </Tab>
+      </Tabs>
     </Stack>
   )
 }

@@ -1,6 +1,6 @@
 import { applyText } from './apply'
 import type { BoardConfig } from './config'
-import type { ChangeCard, Command, CommandName, Count, PullRequest, Stage, Ticket } from './protocol'
+import type { ChangeCard, Command, CommandName, Count, PullRequest, Stage, TaskSection, Ticket } from './protocol'
 
 export interface Entry {
   name: string
@@ -17,6 +17,23 @@ export const MAX_FILES = 200
 const MAX_DEPTH = 6
 const TASK_LINE = /^\s*[-*]\s+\[([ xX])\]/gm
 const SKIP_SPECS = /^skip_specs:\s*true\s*$/m
+
+const HEADING = /^#{1,6}\s+(.+?)\s*#*\s*$/
+const TASK = /^\s*[-*]\s+\[([ xX])\]\s+(.*)$/
+
+export function taskSections(markdown: string): TaskSection[] {
+  const sections: TaskSection[] = [{ title: '', tasks: [] }]
+  for (const line of markdown.split('\n')) {
+    const heading = HEADING.exec(line)
+    const task = TASK.exec(line)
+    if (heading) {
+      sections.push({ title: heading[1], tasks: [] })
+    } else if (task) {
+      sections[sections.length - 1].tasks.push({ text: task[2].trim(), done: task[1] !== ' ' })
+    }
+  }
+  return sections.filter((section) => section.tasks.length > 0)
+}
 
 export function countTasks(markdown: string): Count {
   let done = 0
@@ -175,6 +192,7 @@ export async function readCard(
     ticket,
     pullRequests,
     pullRequestsUnknown,
+    inThisWorkspace: false,
     commands,
     place: commands.length > 0 ? { kind: 'here' } : { kind: 'none', reason: refused }
   }

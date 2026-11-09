@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { commandsOf, listChangeFiles, listChanges, MAX_FILES, readCard, resumeLine, stageOf } from './changes'
+import { commandsOf, listChangeFiles, listChanges, MAX_FILES, readCard, resumeLine, stageOf, taskSections } from './changes'
 import { DEFAULT_CONFIG, parseConfig } from './config'
 import { fakeFiles } from './fake-files'
 import type { PullRequest } from './protocol'
@@ -93,6 +93,14 @@ test('the resume line reads its whole paragraph, up to a blank line or a list', 
   assert.equal(resumeLine(markdown, pattern), 'hourly capacity and the overnight run.')
   assert.equal(resumeLine('Next: wire it\n\nlater text\n', /^Next:/m), 'wire it')
   assert.equal(resumeLine('nothing here', pattern), null)
+})
+
+test('tasks.md splits into sections by heading, keeping only sections with tasks', () => {
+  const markdown = 'Next: wire it\n\n## 1. Backend\n\n- [x] 1.1 store the flag\n- [ ] 1.2 read it\n\n## Notes\n\ntext\n\n## 2. Web\n* [X] 2.1 toggle\n'
+  assert.deepEqual(taskSections(markdown), [
+    { title: '1. Backend', tasks: [{ text: '1.1 store the flag', done: true }, { text: '1.2 read it', done: false }] },
+    { title: '2. Web', tasks: [{ text: '2.1 toggle', done: true }] }
+  ])
 })
 
 test('a change without a ticket cannot be applied when the command needs one', async () => {

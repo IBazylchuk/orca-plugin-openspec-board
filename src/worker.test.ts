@@ -42,6 +42,7 @@ const SEARCH_OUTPUT = JSON.stringify([
 
 function setUp(agents: { terminalId: string | null }[] = [{ terminalId: 't1' }], searchOutput: string | null = SEARCH_OUTPUT) {
   const runs: string[][] = []
+  const watchers: { path: string; onChange: () => void; stopped: boolean }[] = []
   const host = mockHost({
     results: {
       'workspace.readContext': { branch: '', displayName: 'PROJ-7', terminals: [] },
@@ -66,10 +67,17 @@ function setUp(agents: { terminalId: string | null }[] = [{ terminalId: 't1' }],
     run: async (command: string, args: string[]) => {
       runs.push([command, ...args])
       return command === 'orca' ? JSON.stringify({ ok: true }) : searchOutput
+    },
+    watch: (path: string, onChange: () => void) => {
+      const watcher = { path, onChange, stopped: false }
+      watchers.push(watcher)
+      return () => {
+        watcher.stopped = true
+      }
     }
   }
   const main = { default: (orca: OrcaWorkerApi) => register(orca, io) }
-  return { host, runs, main }
+  return { host, runs, main, watchers }
 }
 
 test('board: stages, resume line, ticket and pull requests of the focused workspace', async () => {
@@ -194,6 +202,32 @@ test('a change without its own workspace starts one with an agent that gets the 
     ]
   ])
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('the board watches its changes folder, tells the panel when a file changes, and pins its own change', async () => {
+  const { host, main, watchers } = setUp()
+  const worker = await mountWorker(main, { host })
+  const board = await worker.request('board.get', undefined)
+  await worker.request('board.get', undefined)
+  assert.deepEqual(
+    board.changes.filter((card) => card.inThisWorkspace).map((card) => card.name),
+    ['proj-7-dark-mode']
+  )
+  assert.deepEqual(watchers.map((watcher) => watcher.path), [`${PATH}/openspec/changes`])
+  watchers[0].onChange()
+  assert.deepEqual(worker.posts.map((post) => post.event), ['board.changed'])
+  await worker.deactivate()
+})
+
+test('tasks come back as sections of a listed change only', async () => {
+  const { host, main } = setUp()
+  const worker = await mountWorker(main, { host })
+  await worker.request('board.get', undefined)
+  assert.deepEqual(await worker.request('change.tasks', { workspaceId: 'w1', change: 'proj-7-dark-mode' }), {
+    sections: [{ title: '', tasks: [{ text: 'one', done: true }, { text: 'two', done: false }] }]
+  })
+  assert.deepEqual(await worker.request('change.tasks', { workspaceId: 'w1', change: '..' }), { sections: null })
   await worker.deactivate()
 })
 
