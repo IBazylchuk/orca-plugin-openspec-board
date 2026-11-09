@@ -1,18 +1,56 @@
 # OpenSpec Board for Orca
 
-A read-only board of the [OpenSpec](https://github.com/Fission-AI/OpenSpec) changes in
-the workspace Orca shows. Each change appears under its stage with its task progress,
-the line you resume from, its ticket and its pull requests. Buttons at the top count the
-changes in each stage and show one stage at a time. Apply and Finish send a command you
-choose to an agent of the change's own workspace, and can start that workspace.
+A kanban board for [OpenSpec](https://github.com/Fission-AI/OpenSpec) spec-driven
+development inside [Orca](https://orca.dev), the app that runs a fleet of AI coding
+agents such as Claude Code and Codex. It shows every active OpenSpec change by stage,
+with its task progress, the next step, its ticket and its GitHub pull requests, and
+sends `/opsx:apply`, a finish check or your own command to the agent working on that
+change, in one click.
 
-Without a config it behaves like plain OpenSpec. Teams that run OpenSpec their own way
-describe that in one file, `openspec/board.json`, and the board follows it.
+![OpenSpec Board in Orca: changes grouped by stage with task progress, next step, ticket and Apply buttons (demo data)](docs/board-dark.png)
+
+*The screenshot uses made-up demo data.*
+
+## Why
+
+OpenSpec keeps each change in `openspec/changes/` as a proposal, a design and a task
+list. With several agents working in parallel it gets hard to see which change is where,
+which one stalled after its pull requests were merged, and which agent should take the
+next step. The board answers that from the files and from GitHub, without a separate
+tracker to keep in sync.
+
+## Features
+
+- **Stages from real signals**: Planning, Ready, In progress, In review, Merged with
+  open tasks, Complete, worked out from the artifacts, the ticked tasks in `tasks.md`
+  and the change's pull requests.
+- **Stage filter**: buttons at the top count the changes in each stage and show one
+  stage at a time.
+- **Next step**: the `Next:` paragraph of `tasks.md`, so you resume where the last
+  session stopped.
+- **Tickets**: a link to the ticket for each change, from a pattern on the folder name
+  (Jira, Linear, GitHub Issues or any tracker with a URL per key).
+- **GitHub pull requests**: open, merged and closed pull requests per change, found
+  with `gh search prs`.
+- **Apply and Finish**: send `/opsx:apply`, a check-then-`/opsx:archive`, or any command
+  you configure to a Claude Code, Codex or other agent, only in the change's own Orca
+  workspace, or create that workspace with an agent already working.
+- **Read the change**: proposal, design, tasks and specs rendered in the panel, one
+  click to open them in Orca's editor.
+- **One config file**: `openspec/board.json` describes how your team runs OpenSpec;
+  without it the board behaves like plain OpenSpec.
+- **Read-only**: it never writes a file in your repository.
 
 ## Install
 
-In Orca, install the plugin from this repository's Git URL, then approve the access it
-asks for: read the focused workspace, read the agent list, send text to a terminal, and
+Requires Orca 1.4.248 or newer. Install it from the Orca CLI, or from this repository's
+Git URL in Orca's plugin settings:
+
+```sh
+orca plugin install IBazylchuk/orca-plugin-openspec-board
+```
+
+Then approve the access it asks for: read the focused workspace, read the agent list, send text to a terminal, and
 open workspaces and files in Orca (for "Open in editor" and "Go to"). Without a version
 Orca installs the newest `vX.Y.Z` tag.
 
@@ -110,7 +148,12 @@ orca plugin types .
 orca plugin test .
 orca plugin check .
 orca plugin dev watch .
+scripts/screenshots.sh
 ```
+
+`scripts/screenshots.sh` redraws the images in `docs/` from the made-up demo data in
+`src/panel.check.ts`. Orca draws them inside its window, so it waits a few seconds for
+you to hide Orca (Cmd+H) first.
 
 See [AGENTS.md](AGENTS.md) for the rules of this repository.
 
