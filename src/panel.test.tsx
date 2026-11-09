@@ -84,7 +84,9 @@ const BOARD: BoardSnapshot = {
   ]
 }
 
-function hostWith(applied: unknown[], state = 'waiting') {
+const LONG_TASK = `2.5 ${'merged and deployed, checked on production; '.repeat(25)}`
+
+function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it') {
   return mockHost({
     results: {
       'agents.list': {
@@ -101,7 +103,7 @@ function hostWith(applied: unknown[], state = 'waiting') {
       'change.files': () => ({ files: ['proposal.md', 'tasks.md'], truncated: false }),
       'change.read': ({ path }) => ({ text: `# ${path}` }),
       'change.tasks': () => ({
-        sections: [{ title: '1. Toggle', tasks: [{ text: '1.1 store the flag', done: true }, { text: '1.2 wire it', done: false }] }]
+        sections: [{ title: '1. Toggle', tasks: [{ text: '1.1 store the flag', done: true }, { text: taskText, done: false }] }]
       }),
       'change.run': (input) => {
         applied.push(input)
@@ -207,6 +209,19 @@ test('Apply is disabled while the agent is busy or waits for an approval', async
   }
 })
 
+test('a very long task still draws as a checkbox with its whole text', async () => {
+  const view = await mount(panel, { host: hostWith([], 'waiting', LONG_TASK) })
+  await view.press(view.findAll({ text: 'Open' })[0])
+  assert.deepEqual(view.refusals, [])
+  const boxes = view.findAll({ type: 'Checkbox' })
+  assert.equal(boxes.length, 2)
+  const shown = `${boxes[1].label ?? ''} ${view.find({ text: /^…/ })?.text ?? ''}`.replaceAll('…', '').replace(/\s+/g, ' ')
+  assert.equal(shown, LONG_TASK.replace(/\s+/g, ' ').trim())
+  assert.ok(view.find({ label: 'Run task 2.5' }))
+  assert.deepEqual(panel.splitLabel('short'), { label: 'short', rest: '' })
+  await view.unmount()
+})
+
 test('the change of this workspace is pinned on top', async () => {
   const view = await mount(panel, { host: hostWith([]) })
   const headings = view.findAll({ type: 'Heading' }).map((heading) => heading.text)
@@ -221,8 +236,8 @@ test('opening a change shows its task list, then its files, and goes back to the
   assert.equal(view.find({ label: '1.1 store the flag' })?.props.checked, true)
   assert.equal(view.find({ label: '1.2 wire it' })?.props.checked, false)
   assert.equal(view.find({ type: 'Collapsible' })?.props.description, '1 of 2 done')
-  assert.equal(view.find({ label: 'Run 1.1 store the flag' }), null)
-  await view.press({ label: 'Run 1.2 wire it' })
+  assert.equal(view.find({ label: 'Run task 1.1' }), null)
+  await view.press({ label: 'Run task 1.2' })
   assert.ok(view.find({ text: 'Sent /work PROJ-7 only task 1.2 wire it' }))
   assert.deepEqual(applied, [
     { workspaceId: 'w1', change: 'proj-7-dark-mode', task: '1.2 wire it', terminalId: 't1' }

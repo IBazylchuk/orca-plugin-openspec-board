@@ -491,7 +491,49 @@ async function runTask(ref: ChangeRef, task: string): Promise<void> {
 const runsHere = (ref: ChangeRef): boolean =>
   read(snapshot)?.changes.some((change) => change.name === ref.change && change.place.kind === 'here') ?? false
 
+export const MAX_LABEL = 1024
+const TASK_NUMBER = /^\d+(\.\d+)*/
+const SHORT_NAME = 80
+
+export const taskName = (text: string): string => TASK_NUMBER.exec(text)?.[0] ?? text.slice(0, SHORT_NAME)
+
+export function splitLabel(text: string): { label: string; rest: string } {
+  if (text.length <= MAX_LABEL) {
+    return { label: text, rest: '' }
+  }
+  const cut = text.lastIndexOf(' ', MAX_LABEL - 1)
+  const at = cut > MAX_LABEL / 2 ? cut : MAX_LABEL - 1
+  return { label: `${text.slice(0, at)}…`, rest: `…${text.slice(at).trimStart()}` }
+}
+
 const doneCount = (section: TaskSection): number => section.tasks.filter((task) => task.done).length
+
+function TaskRow(props: { change: ChangeRef; text: string; done: boolean; runnable: boolean; blocker: string | null }) {
+  const { label, rest } = splitLabel(props.text)
+  return (
+    <Row gap="xs" align="start">
+      <Stack gap="xs">
+        <Checkbox label={label} checked={props.done} disabled={props.done} />
+        {rest ? (
+          <Text size="sm" muted>
+            {rest}
+          </Text>
+        ) : null}
+      </Stack>
+      {props.runnable && !props.done ? (
+        <IconButton
+          icon="play"
+          size="sm"
+          variant="ghost"
+          label={`Run task ${taskName(props.text)}`}
+          tooltip={props.blocker ?? 'Send this task alone to the agent'}
+          disabled={props.blocker !== null}
+          onPress={() => runTask(props.change, props.text)}
+        />
+      ) : null}
+    </Row>
+  )
+}
 
 function TaskList({ change }: { change: ChangeRef }) {
   const sections = read(tasks)
@@ -517,20 +559,14 @@ function TaskList({ change }: { change: ChangeRef }) {
           >
             <Stack gap="xs">
               {section.tasks.map((task, taskIndex) => (
-                <Row key={taskIndex} gap="xs" align="start">
-                  <Checkbox label={task.text} checked={task.done} disabled={task.done} />
-                  {runnable && !task.done ? (
-                    <IconButton
-                      icon="play"
-                      size="sm"
-                      variant="ghost"
-                      label={`Run ${task.text}`}
-                      tooltip={blocker ?? 'Send this task alone to the agent'}
-                      disabled={blocker !== null}
-                      onPress={() => runTask(change, task.text)}
-                    />
-                  ) : null}
-                </Row>
+                <TaskRow
+                  key={taskIndex}
+                  change={change}
+                  text={task.text}
+                  done={task.done}
+                  runnable={runnable}
+                  blocker={blocker}
+                />
               ))}
             </Stack>
           </Collapsible>
