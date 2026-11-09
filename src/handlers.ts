@@ -1,4 +1,5 @@
 import type { OrcaWorkerApi } from 'orca/worker'
+import { applyText } from './apply'
 import { belongsTo, placeChange, type PlacedWorkspace } from './apply-target'
 import { CONFIG_FILE, parseConfig, type BoardConfig } from './config'
 import { listChangeFiles, listChanges, readCard, taskSections, ticketOf, type Files } from './changes'
@@ -246,6 +247,28 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     const found = listed(ref)
     const text = found ? await io.text(`${found.located.root}/changes/${ref.change}/tasks.md`) : null
     return { sections: text === null ? null : taskSections(text) }
+  })
+
+  orca.panels.handle('task.run', async ({ workspaceId, change, task, terminalId }) => {
+    const found = listed({ workspaceId, change })
+    if (!found || found.card.place.kind !== 'here') {
+      return { sent: false, message: 'That change runs in its own workspace, not from here' }
+    }
+    const text = await io.text(`${found.located.root}/changes/${change}/tasks.md`)
+    const open = taskSections(text ?? '').some((section) => section.tasks.some((item) => !item.done && item.text === task))
+    if (!open) {
+      return { sent: false, message: 'That task is not an open task of this change any more' }
+    }
+    const built = applyText(found.located.config.task, change, found.card.ticket, task)
+    if ('refused' in built) {
+      return { sent: false, message: built.refused }
+    }
+    const { agents } = await orca.host.call('agents.list')
+    if (!agents.some((agent) => agent.terminalId === terminalId)) {
+      return { sent: false, message: 'That agent terminal is gone' }
+    }
+    const { accepted } = await orca.host.call('terminal.sendText', { terminalId, text: built.text, enter: true })
+    return { sent: accepted, message: accepted ? `Sent ${built.text}` : 'Orca did not accept the text' }
   })
 
   orca.panels.handle('workspace.go', async ({ workspaceId }) => {

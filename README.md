@@ -41,7 +41,9 @@ tracker to keep in sync.
   you configure to a Claude Code, Codex or other agent, only in the change's own Orca
   workspace, or create that workspace with an agent already working.
 - **Task list**: each change opens on its `tasks.md` as a checklist, one collapsible
-  section per heading with its done count; finished sections start folded.
+  section per heading with its done count; finished sections start folded. In the
+  change's own workspace a run button beside each open task sends that task alone to
+  the agent.
 - **Read the change**: proposal, design and specs rendered in the panel, one click to
   open them in Orca's editor.
 - **One config file**: `openspec/board.json` describes how your team runs OpenSpec;
@@ -114,6 +116,7 @@ Archived changes are not shown.
 | `pullRequests` | off | `gh search prs --owner <owner>` with `search`, where `{ticket}` becomes up to six tickets joined by `OR`. Only pull requests whose title names the ticket count. Results are kept five minutes, and kept as they were when a search fails. GitHub allows 30 searches a minute per account, shared with your other `gh` use. Needs `gh` signed in |
 | `apply` | `/opsx:apply {change}` | What Apply sends; `{change}` and `{ticket}` are replaced |
 | `finish` | a check, then `/opsx:archive {change}` | What Finish sends. The default asks the agent to compare `tasks.md` with the code, the Git history and the pull requests, tick what is really done, run `/opsx:archive` when nothing is left, and otherwise list what is left and stop. Set your own to add your release steps, such as moving the ticket to Done |
+| `task` | `/opsx:apply {change} only task {task}` | What a task's run button sends; `{task}` is the task's text as written in `tasks.md` |
 | `agent` | `claude` | The agent a "… in new" button starts in the new workspace |
 | `applyAnywhere` | `false` | `true` lets Apply send any change to an agent of whatever workspace is focused, instead of only from the change's own workspace |
 | `files.exclude` | none | Folders inside a change that the file list never walks, such as raw research output |

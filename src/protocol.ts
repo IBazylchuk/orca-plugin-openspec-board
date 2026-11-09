@@ -84,6 +84,10 @@ declare module 'orca' {
     }
     'workspace.go': { input: { workspaceId: string }; output: { opened: boolean; message: string } }
     'change.tasks': { input: ChangeRef; output: { sections: TaskSection[] | null } }
+    'task.run': {
+      input: ChangeRef & { task: string; terminalId: string }
+      output: { sent: boolean; message: string }
+    }
   }
   interface PluginPanelEvents {
     'board.changed': { at: number }

@@ -16,6 +16,7 @@ export interface BoardConfig {
   pullRequests: PullRequestRule | null
   apply: string
   finish: string
+  task: string
   agent: string
   applyAnywhere: boolean
   exclude: string[]
@@ -31,6 +32,7 @@ export const DEFAULT_CONFIG: BoardConfig = {
   apply: '/opsx:apply {change}',
   finish:
     'Check whether the OpenSpec change {change} is finished: compare openspec/changes/{change}/tasks.md with the code, the git history and its pull requests, and tick each task that is really done. If every task is done, run /opsx:archive {change}. Otherwise list what is left and stop without starting it.',
+  task: '/opsx:apply {change} only task {task}',
   agent: 'claude',
   applyAnywhere: false,
   exclude: []
@@ -139,6 +141,13 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
       config.finish = raw.finish
     } else {
       problems.push('finish must be a non-empty command or prompt, such as "/opsx:archive {change}"')
+    }
+  }
+  if (raw.task !== undefined) {
+    if (typeof raw.task === 'string' && raw.task.includes('{task}')) {
+      config.task = raw.task
+    } else {
+      problems.push('task must be a command containing {task}, such as "/opsx:apply {change} only task {task}"')
     }
   }
   if (raw.agent !== undefined) {

@@ -20,6 +20,7 @@ test('a full config is read', () => {
       pullRequests: { owner: 'example-org' },
       apply: '/work {ticket}',
       finish: '/close {ticket}',
+      task: '/work {ticket} only {task}',
       agent: 'codex',
       files: { exclude: ['research'] }
     })
@@ -28,6 +29,7 @@ test('a full config is read', () => {
   assert.deepEqual(config.requiredArtifacts, ['proposal.md', 'tasks.md'])
   assert.equal(config.finish, '/close {ticket}')
   assert.equal(config.agent, 'codex')
+  assert.equal(config.task, '/work {ticket} only {task}')
   assert.equal(config.pullRequests?.search, '{ticket}')
   assert.equal(config.apply, '/work {ticket}')
   assert.deepEqual(config.exclude, ['research'])

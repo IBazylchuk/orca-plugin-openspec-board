@@ -8,6 +8,7 @@ import {
   EmptyState,
   Heading,
   host,
+  IconButton,
   Link,
   Markdown,
   on,
@@ -477,10 +478,23 @@ function Board({ board }: { board: BoardSnapshot }) {
   )
 }
 
+async function runTask(ref: ChangeRef, task: string): Promise<void> {
+  try {
+    set(notice, (await plugin.request('task.run', { ...ref, task, terminalId: read(agentChoice) }, REQUEST)).message)
+  } catch (error) {
+    set(notice, messageOf(error))
+  }
+}
+
+const runsHere = (ref: ChangeRef): boolean =>
+  read(snapshot)?.changes.some((change) => change.name === ref.change && change.place.kind === 'here') ?? false
+
 const doneCount = (section: TaskSection): number => section.tasks.filter((task) => task.done).length
 
-function TaskList() {
+function TaskList({ change }: { change: ChangeRef }) {
   const sections = read(tasks)
+  const runnable = runsHere(change)
+  const blocker = runnable ? applyBlocker() : null
   if (sections === null) {
     return <Spinner label="Reading tasks.md" />
   }
@@ -502,7 +516,19 @@ function TaskList() {
             <Stack gap="xs">
               {section.tasks.map((task, taskIndex) => (
                 <Row key={taskIndex} gap="xs" align="start">
-                  <Badge tone={task.done ? 'success' : 'neutral'}>{task.done ? 'done' : 'open'}</Badge>
+                  {runnable && !task.done ? (
+                    <IconButton
+                      icon="play"
+                      size="sm"
+                      variant="ghost"
+                      label={`Run ${task.text}`}
+                      tooltip={blocker ?? 'Send this task alone to the agent'}
+                      disabled={blocker !== null}
+                      onPress={() => runTask(change, task.text)}
+                    />
+                  ) : (
+                    <Badge tone={task.done ? 'success' : 'neutral'}>{task.done ? 'done' : 'open'}</Badge>
+                  )}
                   <Text size="sm" muted={task.done}>
                     {task.text}
                   </Text>
@@ -565,7 +591,7 @@ function FileView({ change }: { change: ChangeRef }) {
       {read(notice) ? <Text muted>{read(notice)}</Text> : null}
       <Tabs label="Change" value={showing} onChange={(value) => set(view, value === 'files' ? 'files' : 'tasks')}>
         <Tab value="tasks" label="Tasks" icon="check">
-          <TaskList />
+          <TaskList change={change} />
         </Tab>
         <Tab value="files" label="Files" icon="file-text">
           <Files change={change} />

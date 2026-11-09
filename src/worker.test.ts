@@ -231,6 +231,24 @@ test('tasks come back as sections of a listed change only', async () => {
   await worker.deactivate()
 })
 
+test('a single open task of this workspace change goes to the agent; done or foreign tasks do not', async () => {
+  const { host, main } = setUp()
+  const worker = await mountWorker(main, { host })
+  await worker.request('board.get', undefined)
+  const ref = { workspaceId: 'w1', change: 'proj-7-dark-mode', terminalId: 't1' }
+  assert.deepEqual(await worker.request('task.run', { ...ref, task: 'two' }), {
+    sent: true,
+    message: 'Sent /opsx:apply proj-7-dark-mode only task two'
+  })
+  assert.equal((await worker.request('task.run', { ...ref, task: 'one' })).sent, false)
+  assert.equal((await worker.request('task.run', { ...ref, task: 'three' })).sent, false)
+  assert.equal((await worker.request('task.run', { ...ref, change: 'proj-9-api', task: 'one' })).sent, false)
+  assert.deepEqual(host.callsOf('terminal.sendText'), [
+    { terminalId: 't1', text: '/opsx:apply proj-7-dark-mode only task two', enter: true }
+  ])
+  await worker.deactivate()
+})
+
 test('no focused workspace is a problem, not an error', async () => {
   const { main } = setUp()
   const host = mockHost({ results: { 'workspace.readContext': null } })

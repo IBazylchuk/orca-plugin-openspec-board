@@ -111,6 +111,10 @@ function hostWith(applied: unknown[], state = 'waiting') {
         applied.push(input)
         return { started: true, message: 'Created PROJ-4; claude got /close PROJ-4' }
       },
+      'task.run': (input) => {
+        applied.push(input)
+        return { sent: true, message: 'Sent /work PROJ-7 only task 1.2 wire it' }
+      },
       'workspace.go': (input) => {
         applied.push(input)
         return { opened: true, message: 'Opened PROJ-9' }
@@ -211,10 +215,17 @@ test('the change of this workspace is pinned on top', async () => {
 })
 
 test('opening a change shows its task list, then its files, and goes back to the board', async () => {
-  const view = await mount(panel, { host: hostWith([]) })
+  const applied: unknown[] = []
+  const view = await mount(panel, { host: hostWith(applied) })
   await view.press(view.findAll({ text: 'Open' })[0])
   assert.ok(view.find({ text: '1.2 wire it' }))
   assert.equal(view.find({ type: 'Collapsible' })?.props.description, '1 of 2 done')
+  assert.equal(view.find({ label: 'Run 1.1 store the flag' }), null)
+  await view.press({ label: 'Run 1.2 wire it' })
+  assert.ok(view.find({ text: 'Sent /work PROJ-7 only task 1.2 wire it' }))
+  assert.deepEqual(applied, [
+    { workspaceId: 'w1', change: 'proj-7-dark-mode', task: '1.2 wire it', terminalId: 't1' }
+  ])
   await view.select({ label: 'Change' }, 'files')
   assert.equal(view.find({ label: 'File' })?.props.value, 'proposal.md')
   assert.equal(view.find({ type: 'Markdown' })?.props.content, '# proposal.md')
