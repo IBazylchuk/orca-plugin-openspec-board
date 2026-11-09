@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Enable once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+scripts/check-no-private-refs.sh

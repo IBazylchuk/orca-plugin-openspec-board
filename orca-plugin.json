@@ -1,0 +1,30 @@
+{
+  "manifestVersion": 2,
+  "id": "openspec-board",
+  "name": "OpenSpec Board",
+  "version": "0.1.0",
+  "description": "A read-only board of the OpenSpec changes in the focused workspace: stage, task progress, the resume line, the ticket and its pull requests. Apply types a command you choose into a running agent.",
+  "license": "MIT",
+  "engines": {
+    "orca": ">=1.4.248"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "openspec-board",
+        "title": "OpenSpec Board",
+        "icon": "layers",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ]
+  },
+  "capabilities": [
+    { "kind": "workspace:read" },
+    { "kind": "agent:read" },
+    { "kind": "terminal:send" }
+  ]
+}
