@@ -9,10 +9,6 @@ change, in one click.
 
 ![OpenSpec Board in Orca: changes grouped by stage with task progress, next step, ticket and Apply buttons (demo data)](docs/screenshot-dark.png)
 
-<p align="center">
-  <img src="docs/board-light.png" width="300" alt="The whole board in light theme, from Planning to Complete (demo data)">
-</p>
-
 *The screenshots use made-up demo data.*
 
 ## Why
