@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import type { Io } from './handlers'
 
 const PATH = `${process.env.PATH ?? ''}:/opt/homebrew/bin:/usr/local/bin`
-const RUN_TIMEOUT_MS = 15_000
+const RUN_TIMEOUT_MS = 30_000
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 
 export const diskIo: Io = {

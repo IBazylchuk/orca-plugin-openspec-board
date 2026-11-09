@@ -5,7 +5,7 @@ const CONTROL = new RegExp(`[\\u0000-\\u001f\\u007f-\\u009f${LINE_SEPARATORS}]`)
 
 export function applyText(template: string, change: string, ticket: Ticket | null): { text: string } | { refused: string } {
   if (template.includes('{ticket}') && !ticket) {
-    return { refused: `The apply command needs a ticket, and "${change}" does not match the ticket pattern` }
+    return { refused: `The command needs a ticket, and "${change}" does not match the ticket pattern` }
   }
   const values: Record<string, string> = { change, ticket: ticket?.key ?? '' }
   for (const [name, value] of Object.entries(values)) {
@@ -15,7 +15,7 @@ export function applyText(template: string, change: string, ticket: Ticket | nul
   }
   const text = template.replace(/\{(change|ticket)\}/g, (_, name: string) => values[name])
   if (CONTROL.test(text)) {
-    return { refused: 'The apply command holds a control character, so nothing was typed' }
+    return { refused: 'The command holds a control character, so nothing was typed' }
   }
   return { text }
 }

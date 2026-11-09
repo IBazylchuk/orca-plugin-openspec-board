@@ -1,4 +1,11 @@
-export type Stage = 'planning' | 'ready' | 'in-progress' | 'in-review' | 'complete'
+export type Stage = 'planning' | 'ready' | 'in-progress' | 'in-review' | 'merged' | 'complete'
+
+export type CommandName = 'apply' | 'finish'
+
+export interface Command {
+  name: CommandName
+  text: string
+}
 
 export interface Count {
   done: number
@@ -27,12 +34,14 @@ export interface ChangeCard {
   resume: string | null
   ticket: Ticket | null
   pullRequests: PullRequest[] | null
-  apply: ApplyTarget
+  commands: Command[]
+  place: Place
 }
 
-export type ApplyTarget =
+export type Place =
   | { kind: 'here' }
   | { kind: 'elsewhere'; workspaceId: string; workspaceName: string }
+  | { kind: 'new'; workspaceName: string }
   | { kind: 'none'; reason: string | null }
 
 export interface BoardSnapshot {
@@ -53,9 +62,13 @@ declare module 'orca' {
     'change.files': { input: ChangeRef; output: { files: string[]; truncated: boolean } }
     'change.read': { input: ChangeRef & { path: string }; output: { text: string | null } }
     'change.edit': { input: ChangeRef & { path: string }; output: { opened: boolean; message: string } }
-    'change.apply': {
-      input: ChangeRef & { terminalId: string }
+    'change.run': {
+      input: ChangeRef & { command: CommandName; terminalId: string }
       output: { sent: boolean; message: string }
+    }
+    'change.start': {
+      input: ChangeRef & { command: CommandName }
+      output: { started: boolean; message: string }
     }
     'workspace.go': { input: { workspaceId: string }; output: { opened: boolean; message: string } }
   }

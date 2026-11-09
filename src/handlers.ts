@@ -1,10 +1,9 @@
 import type { OrcaWorkerApi } from 'orca/worker'
-import { applyText } from './apply'
-import { placeApply, type PlacedWorkspace } from './apply-target'
+import { belongsTo, placeChange, type PlacedWorkspace } from './apply-target'
 import { CONFIG_FILE, parseConfig, type BoardConfig } from './config'
 import { listChangeFiles, listChanges, readCard, ticketOf, type Files } from './changes'
 import { pullRequestFinder, type Runner } from './pull-requests'
-import type { BoardSnapshot, ChangeCard, ChangeRef, PullRequest } from './protocol'
+import type { BoardSnapshot, ChangeCard, ChangeRef, CommandName, PullRequest } from './protocol'
 
 export interface Io extends Files {
   run: Runner
@@ -26,6 +25,21 @@ interface Located {
 const OPENSPEC = 'openspec'
 
 const isLocal = (workspace: Workspace): boolean => workspace.hostId === null || workspace.hostId === 'local'
+
+const ORCA_CLI = 'orca'
+
+interface CliReply {
+  ok?: boolean
+  error?: { message?: string }
+}
+
+function cliReply(output: string | null): CliReply | null {
+  try {
+    return output ? (JSON.parse(output) as CliReply) : null
+  } catch {
+    return null
+  }
+}
 
 function pickFocused(workspaces: Workspace[], branch: string, displayName: string): Workspace | string {
   const named = workspaces.filter((w) => w.name === displayName)
@@ -70,6 +84,29 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     return new Map(names.map((name) => [name, found.get(ticketOf(name, located.config)?.key ?? '') ?? null]))
   }
 
+  async function seesChange(located: Located, workspace: Workspace, change: string): Promise<boolean> {
+    return (
+      workspace.path === located.workspace.path ||
+      (await io.list(`${workspace.path}/${OPENSPEC}/changes/${change}`)) !== null
+    )
+  }
+
+  async function place(located: Located, card: ChangeCard): Promise<ChangeCard['place']> {
+    const owners = located.others.filter((workspace) => belongsTo(workspace, card))
+    const seeing: Workspace[] = []
+    for (const workspace of owners) {
+      if (await seesChange(located, workspace, card.name)) {
+        seeing.push(workspace)
+      }
+    }
+    return placeChange(card, {
+      focused: located.workspace,
+      seeing,
+      applyAnywhere: located.config.applyAnywhere,
+      canCreate: located.workspace.kind === 'folder'
+    })
+  }
+
   async function board(fresh: boolean): Promise<BoardSnapshot> {
     const located = await locate()
     if (typeof located === 'string') {
@@ -90,10 +127,7 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     const read = await Promise.all(
       names.map((name) => readCard(io, located.root, name, located.config, pullRequests.get(name) ?? null))
     )
-    const changes = read.map((card) => ({
-      ...card,
-      apply: placeApply(card, located.workspace, located.others, located.config.applyAnywhere)
-    }))
+    const changes = await Promise.all(read.map(async (card) => ({ ...card, place: await place(located, card) })))
     current = { located, changes }
     return { workspaceId: located.workspace.id, changes, problems: located.problems, checkedAt: Date.now() }
   }
@@ -138,27 +172,63 @@ export function register(orca: OrcaWorkerApi, io: Io): void {
     return { opened: true, message: `Opened ${ref.path}` }
   })
 
-  orca.panels.handle('change.apply', async ({ workspaceId, change, terminalId }) => {
+  const commandOf = (card: ChangeCard, name: CommandName) => card.commands.find((command) => command.name === name)
+
+  orca.panels.handle('change.run', async ({ workspaceId, change, command, terminalId }) => {
     const found = listed({ workspaceId, change })
-    if (!found || found.card.apply.kind !== 'here') {
-      return { sent: false, message: 'That change is applied in its own workspace, not from here' }
+    if (!found || found.card.place.kind !== 'here') {
+      return { sent: false, message: 'That change runs in its own workspace, not from here' }
+    }
+    const chosen = commandOf(found.card, command)
+    if (!chosen) {
+      return { sent: false, message: `That change has no ${command} at its stage` }
     }
     const { agents } = await orca.host.call('agents.list')
     if (!agents.some((agent) => agent.terminalId === terminalId)) {
       return { sent: false, message: 'That agent terminal is gone' }
     }
-    const built = applyText(found.located.config.apply, change, found.card.ticket)
-    if ('refused' in built) {
-      return { sent: false, message: built.refused }
+    const { accepted } = await orca.host.call('terminal.sendText', { terminalId, text: chosen.text, enter: true })
+    return { sent: accepted, message: accepted ? `Sent ${chosen.text}` : 'Orca did not accept the text' }
+  })
+
+  orca.panels.handle('change.start', async ({ workspaceId, change, command }) => {
+    const found = listed({ workspaceId, change })
+    const target = found?.card.place
+    const chosen = found ? commandOf(found.card, command) : undefined
+    if (!found || target?.kind !== 'new' || !chosen) {
+      return { started: false, message: 'That change cannot start a workspace from here' }
     }
-    const { accepted } = await orca.host.call('terminal.sendText', { terminalId, text: built.text, enter: true })
-    return { sent: accepted, message: accepted ? `Sent ${built.text}` : 'Orca did not accept the text' }
+    const { workspaces } = await orca.host.call('workspace.list')
+    if (workspaces.some((workspace) => workspace.name === target.workspaceName)) {
+      return { started: false, message: `A workspace named ${target.workspaceName} already exists; refresh the board` }
+    }
+    const reply = cliReply(
+      await io.run(ORCA_CLI, [
+        'worktree',
+        'create',
+        '--repo',
+        `path:${found.located.workspace.path}`,
+        '--name',
+        target.workspaceName,
+        '--no-parent',
+        '--agent',
+        found.located.config.agent,
+        '--prompt',
+        chosen.text,
+        '--activate',
+        '--json'
+      ])
+    )
+    if (!reply?.ok) {
+      return { started: false, message: reply?.error?.message ?? 'Orca did not create the workspace' }
+    }
+    return { started: true, message: `Created ${target.workspaceName}; ${found.located.config.agent} got ${chosen.text}` }
   })
 
   orca.panels.handle('workspace.go', async ({ workspaceId }) => {
     const target = current?.changes
-      .map((card) => card.apply)
-      .find((apply) => apply.kind === 'elsewhere' && apply.workspaceId === workspaceId)
+      .map((card) => card.place)
+      .find((place) => place.kind === 'elsewhere' && place.workspaceId === workspaceId)
     if (!target || target.kind !== 'elsewhere') {
       return { opened: false, message: 'That workspace is not the own workspace of a listed change' }
     }

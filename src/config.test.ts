@@ -15,17 +15,19 @@ test('a full config is read', () => {
   const { config, problems } = parseConfig(
     JSON.stringify({
       requiredArtifacts: ['proposal.md', 'tasks.md'],
-      complete: 'pullRequests',
       resumeLine: '^Next:',
       ticket: { pattern: '^proj-(\\d+)', key: 'PROJ-$1', url: 'https://tracker.example.com/browse/{ticket}' },
       pullRequests: { owner: 'example-org' },
       apply: '/work {ticket}',
+      finish: '/close {ticket}',
+      agent: 'codex',
       files: { exclude: ['research'] }
     })
   )
   assert.deepEqual(problems, [])
   assert.deepEqual(config.requiredArtifacts, ['proposal.md', 'tasks.md'])
-  assert.equal(config.complete, 'pullRequests')
+  assert.equal(config.finish, '/close {ticket}')
+  assert.equal(config.agent, 'codex')
   assert.equal(config.pullRequests?.search, '{ticket}')
   assert.equal(config.apply, '/work {ticket}')
   assert.deepEqual(config.exclude, ['research'])
@@ -39,17 +41,19 @@ test('invalid fields are reported one by one and fall back', () => {
       resumeLine: '(',
       ticket: { pattern: '^x', key: 'X', url: 'javascript:alert(1)' },
       pullRequests: { owner: 'bad owner' },
+      agent: 'claude; rm -rf ~',
       files: { exclude: 'research' }
     })
   )
-  assert.equal(problems.length, 6)
+  assert.equal(problems.length, 7)
+  assert.equal(config.agent, 'claude')
   assert.deepEqual(config.requiredArtifacts, DEFAULT_CONFIG.requiredArtifacts)
   assert.equal(config.ticket, null)
   assert.equal(config.pullRequests, null)
 })
 
-test('completion by pull requests without a ticket rule falls back to ticks', () => {
+test('the old complete setting is reported as no longer read', () => {
   const { config, problems } = parseConfig(JSON.stringify({ complete: 'pullRequests' }))
-  assert.equal(config.complete, 'ticks')
+  assert.deepEqual(config, DEFAULT_CONFIG)
   assert.equal(problems.length, 1)
 })

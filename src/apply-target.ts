@@ -1,5 +1,5 @@
 import { mentionsKey } from './pull-requests'
-import type { ApplyTarget, ChangeCard } from './protocol'
+import type { ChangeCard, Place } from './protocol'
 
 export interface PlacedWorkspace {
   id: string
@@ -8,33 +8,43 @@ export interface PlacedWorkspace {
   branch: string | null
 }
 
+const WORKSPACE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
+
+export const ownWorkspaceName = (card: Pick<ChangeCard, 'name' | 'ticket'>): string => card.ticket?.key ?? card.name
+
 export function belongsTo(workspace: PlacedWorkspace, card: Pick<ChangeCard, 'name' | 'ticket'>): boolean {
   const keys = [card.ticket?.key, card.name].filter((key): key is string => Boolean(key))
   const labels = [workspace.name, workspace.branch ?? '']
   return keys.some((key) => labels.some((label) => mentionsKey(label, key)))
 }
 
-const ownWorkspaceFirst = (key: string | undefined) => (a: PlacedWorkspace, b: PlacedWorkspace): number => {
+const ownWorkspaceFirst = (key: string) => (a: PlacedWorkspace, b: PlacedWorkspace): number => {
   const rank = (workspace: PlacedWorkspace): number =>
     (workspace.name === key ? 0 : 2) + (workspace.kind === 'folder' ? 0 : 1)
   return rank(a) - rank(b) || a.name.localeCompare(b.name)
 }
 
-export function placeApply(
-  card: Pick<ChangeCard, 'name' | 'ticket' | 'apply'>,
-  focused: PlacedWorkspace,
-  workspaces: PlacedWorkspace[],
+export interface Placement {
+  focused: PlacedWorkspace
+  seeing: PlacedWorkspace[]
   applyAnywhere: boolean
-): ApplyTarget {
-  if (card.apply.kind !== 'here' || applyAnywhere || belongsTo(focused, card)) {
-    return card.apply
+  canCreate: boolean
+}
+
+export function placeChange(card: Pick<ChangeCard, 'name' | 'ticket' | 'place'>, placement: Placement): Place {
+  const { focused, seeing, applyAnywhere, canCreate } = placement
+  if (card.place.kind !== 'here' || applyAnywhere || belongsTo(focused, card)) {
+    return card.place
   }
-  const own = workspaces
+  const name = ownWorkspaceName(card)
+  const own = seeing
     .filter((workspace) => workspace.id !== focused.id && belongsTo(workspace, card))
-    .sort(ownWorkspaceFirst(card.ticket?.key))[0]
+    .sort(ownWorkspaceFirst(name))[0]
   if (own) {
     return { kind: 'elsewhere', workspaceId: own.id, workspaceName: own.name }
   }
-  const key = card.ticket?.key ?? card.name
-  return { kind: 'none', reason: `Apply runs in the change's own workspace: create one named ${key} in Orca` }
+  if (canCreate && WORKSPACE_NAME.test(name)) {
+    return { kind: 'new', workspaceName: name }
+  }
+  return { kind: 'none', reason: `Runs in the change's own workspace: create one named ${name} in Orca` }
 }

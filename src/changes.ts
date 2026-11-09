@@ -1,6 +1,6 @@
 import { applyText } from './apply'
 import type { BoardConfig } from './config'
-import type { ApplyTarget, ChangeCard, Count, PullRequest, Stage, Ticket } from './protocol'
+import type { ChangeCard, Command, CommandName, Count, PullRequest, Stage, Ticket } from './protocol'
 
 export interface Entry {
   name: string
@@ -30,12 +30,25 @@ export function countTasks(markdown: string): Count {
   return { done, total }
 }
 
+const PARAGRAPH_BREAK = /^\s*($|[-*+]\s|\d+\.\s|#|>|```)/
+const MAX_RESUME_LENGTH = 400
+
 export function resumeLine(markdown: string | null, pattern: RegExp | null): string | null {
   if (!markdown || !pattern) {
     return null
   }
-  const line = markdown.split('\n').find((candidate) => pattern.test(candidate))
-  return line ? line.replace(pattern, '').trim() || line.trim() : null
+  const lines = markdown.split('\n')
+  const start = lines.findIndex((candidate) => pattern.test(candidate))
+  if (start === -1) {
+    return null
+  }
+  const following = lines.slice(start + 1)
+  const end = following.findIndex((line) => PARAGRAPH_BREAK.test(line))
+  const paragraph = [lines[start], ...following.slice(0, end === -1 ? following.length : end)]
+    .map((line) => line.trim())
+    .join(' ')
+  const text = paragraph.replace(pattern, '').trim() || paragraph
+  return text.length > MAX_RESUME_LENGTH ? `${text.slice(0, MAX_RESUME_LENGTH - 1)}…` : text
 }
 
 export function ticketOf(change: string, config: BoardConfig): Ticket | null {
@@ -49,35 +62,61 @@ export function ticketOf(change: string, config: BoardConfig): Ticket | null {
   return { key, url }
 }
 
-export function stageOf(input: {
-  missing: string[]
-  tasks: Count
-  pullRequests: PullRequest[] | null
-  complete: BoardConfig['complete']
-}): Stage {
+export function stageOf(input: { missing: string[]; tasks: Count; pullRequests: PullRequest[] | null }): Stage {
   if (input.missing.length > 0) {
     return 'planning'
   }
   const prs = input.pullRequests ?? []
-  if (input.complete === 'pullRequests') {
-    if (prs.length > 0 && prs.every((pr) => pr.state !== 'open')) {
-      return prs.some((pr) => pr.state === 'merged') ? 'complete' : 'in-progress'
-    }
-    if (prs.some((pr) => pr.state === 'open')) {
-      return 'in-review'
-    }
-  } else {
-    if (input.tasks.total > 0 && input.tasks.done === input.tasks.total) {
-      return 'complete'
-    }
-    if (prs.some((pr) => pr.state === 'open')) {
-      return 'in-review'
-    }
+  if (prs.some((pr) => pr.state === 'open')) {
+    return 'in-review'
+  }
+  if (input.tasks.total > 0 && input.tasks.done === input.tasks.total) {
+    return 'complete'
+  }
+  if (prs.some((pr) => pr.state === 'merged')) {
+    return 'merged'
   }
   return input.tasks.done > 0 ? 'in-progress' : 'ready'
 }
 
-export const isApplicable = (stage: Stage): boolean => stage !== 'planning' && stage !== 'complete'
+export const FINISH_FROM_PERCENT = 80
+
+const percentDone = (tasks: Count): number => (tasks.total > 0 ? (tasks.done / tasks.total) * 100 : 0)
+
+export function commandNamesOf(stage: Stage, tasks: Count): CommandName[] {
+  switch (stage) {
+    case 'planning':
+      return []
+    case 'ready':
+    case 'in-progress':
+      return ['apply']
+    case 'in-review':
+      return percentDone(tasks) >= FINISH_FROM_PERCENT ? ['apply', 'finish'] : ['apply']
+    case 'merged':
+    case 'complete':
+      return ['finish']
+  }
+}
+
+export function commandsOf(
+  stage: Stage,
+  tasks: Count,
+  config: Pick<BoardConfig, 'apply' | 'finish'>,
+  name: string,
+  ticket: Ticket | null
+): { commands: Command[]; refused: string | null } {
+  const commands: Command[] = []
+  let refused: string | null = null
+  for (const command of commandNamesOf(stage, tasks)) {
+    const built = applyText(config[command], name, ticket)
+    if ('refused' in built) {
+      refused = built.refused
+    } else if (!commands.some((known) => known.text === built.text)) {
+      commands.push({ name: command, text: built.text })
+    }
+  }
+  return { commands, refused: commands.length > 0 ? null : refused }
+}
 
 const changesDir = (root: string): string => `${root}/changes`
 
@@ -117,8 +156,9 @@ export async function readCard(
     }
   }
   const tasks = tasksText ? countTasks(tasksText) : { done: 0, total: 0 }
-  const stage = stageOf({ missing, tasks, pullRequests, complete: config.complete })
+  const stage = stageOf({ missing, tasks, pullRequests })
   const ticket = ticketOf(name, config)
+  const { commands, refused } = commandsOf(stage, tasks, config, name, ticket)
   return {
     name,
     stage,
@@ -127,16 +167,9 @@ export async function readCard(
     resume: resumeLine(tasksText, config.resumeLine),
     ticket,
     pullRequests,
-    apply: applyBase(stage, config.apply, name, ticket)
+    commands,
+    place: commands.length > 0 ? { kind: 'here' } : { kind: 'none', reason: refused }
   }
-}
-
-function applyBase(stage: Stage, template: string, name: string, ticket: Ticket | null): ApplyTarget {
-  if (!isApplicable(stage)) {
-    return { kind: 'none', reason: null }
-  }
-  const built = applyText(template, name, ticket)
-  return 'refused' in built ? { kind: 'none', reason: built.refused } : { kind: 'here' }
 }
 
 const FIRST_FILES = ['proposal.md', 'design.md', 'tasks.md']

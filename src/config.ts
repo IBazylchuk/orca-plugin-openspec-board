@@ -1,5 +1,3 @@
-export type Completion = 'ticks' | 'pullRequests'
-
 export interface TicketRule {
   pattern: RegExp
   key: string
@@ -13,11 +11,12 @@ export interface PullRequestRule {
 
 export interface BoardConfig {
   requiredArtifacts: string[]
-  complete: Completion
   resumeLine: RegExp | null
   ticket: TicketRule | null
   pullRequests: PullRequestRule | null
   apply: string
+  finish: string
+  agent: string
   applyAnywhere: boolean
   exclude: string[]
 }
@@ -26,17 +25,19 @@ export const CONFIG_FILE = 'board.json'
 
 export const DEFAULT_CONFIG: BoardConfig = {
   requiredArtifacts: ['proposal.md', 'design.md', 'tasks.md', 'specs'],
-  complete: 'ticks',
   resumeLine: null,
   ticket: null,
   pullRequests: null,
   apply: '/opsx:apply {change}',
+  finish: '/opsx:archive {change}',
+  agent: 'claude',
   applyAnywhere: false,
   exclude: []
 }
 
 const SAFE_PATH_PART = /^[^/\\\0]+$/
 const OWNER = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/
+const AGENT = /^[a-z][a-z0-9-]{0,31}$/
 
 type Raw = Record<string, unknown>
 
@@ -114,11 +115,7 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
     }
   }
   if (raw.complete !== undefined) {
-    if (raw.complete === 'ticks' || raw.complete === 'pullRequests') {
-      config.complete = raw.complete
-    } else {
-      problems.push('complete must be "ticks" or "pullRequests"')
-    }
+    problems.push('complete is no longer read: a change is Complete once every task is ticked and no pull request is open')
   }
   if (raw.resumeLine !== undefined) {
     config.resumeLine = compile(raw.resumeLine, 'resumeLine', problems)
@@ -136,6 +133,20 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
       problems.push('apply must be a non-empty command such as "/opsx:apply {change}"')
     }
   }
+  if (raw.finish !== undefined) {
+    if (typeof raw.finish === 'string' && raw.finish.trim() !== '') {
+      config.finish = raw.finish
+    } else {
+      problems.push('finish must be a non-empty command such as "/opsx:archive {change}"')
+    }
+  }
+  if (raw.agent !== undefined) {
+    if (typeof raw.agent === 'string' && AGENT.test(raw.agent)) {
+      config.agent = raw.agent
+    } else {
+      problems.push('agent must be the name of an agent Orca starts, such as "claude" or "codex"')
+    }
+  }
   if (raw.applyAnywhere !== undefined) {
     if (typeof raw.applyAnywhere === 'boolean') {
       config.applyAnywhere = raw.applyAnywhere
@@ -150,10 +161,6 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
     } else {
       problems.push('files.exclude must be a list of folder names')
     }
-  }
-  if (config.complete === 'pullRequests' && (!config.pullRequests || !config.ticket)) {
-    problems.push('complete "pullRequests" needs both ticket and pullRequests; counting ticks instead')
-    config.complete = 'ticks'
   }
   return { config, problems }
 }

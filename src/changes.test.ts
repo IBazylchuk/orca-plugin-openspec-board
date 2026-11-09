@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { listChangeFiles, listChanges, MAX_FILES, readCard, stageOf } from './changes'
+import { commandsOf, listChangeFiles, listChanges, MAX_FILES, readCard, resumeLine, stageOf } from './changes'
 import { DEFAULT_CONFIG, parseConfig } from './config'
 import { fakeFiles } from './fake-files'
 import type { PullRequest } from './protocol'
@@ -18,7 +18,6 @@ const pr = (state: PullRequest['state']): PullRequest => ({
 const ours = parseConfig(
   JSON.stringify({
     requiredArtifacts: ['proposal.md', 'design.md', 'tasks.md'],
-    complete: 'pullRequests',
     resumeLine: '^Next:',
     ticket: { pattern: '^proj-(\\d+)', key: 'PROJ-$1', url: 'https://tracker.example.com/browse/{ticket}' },
     pullRequests: { owner: 'example-org' },
@@ -70,7 +69,16 @@ test('configured project: resume line, ticket and stage by pull requests', async
   assert.equal(card.stage, 'in-review')
   assert.equal(card.resume, 'wire the toggle')
   assert.deepEqual(card.ticket, { key: 'PROJ-7', url: 'https://tracker.example.com/browse/PROJ-7' })
-  assert.deepEqual(card.apply, { kind: 'here' })
+  assert.deepEqual(card.place, { kind: 'here' })
+  assert.deepEqual(card.commands, [{ name: 'apply', text: '/opsx:apply proj-7-dark-mode' }])
+})
+
+test('the resume line reads its whole paragraph, up to a blank line or a list', () => {
+  const pattern = /^(#+\s*)?Next\b.*?:\s/m
+  const markdown = 'Next (checked 08:36 UTC): hourly capacity\nand the overnight run.\n- [ ] one\n'
+  assert.equal(resumeLine(markdown, pattern), 'hourly capacity and the overnight run.')
+  assert.equal(resumeLine('Next: wire it\n\nlater text\n', /^Next:/m), 'wire it')
+  assert.equal(resumeLine('nothing here', pattern), null)
 })
 
 test('a change without a ticket cannot be applied when the command needs one', async () => {
@@ -78,25 +86,46 @@ test('a change without a ticket cannot be applied when the command needs one', a
   const files = fakeFiles({ [`${dir}/proposal.md`]: '', [`${dir}/design.md`]: '', [`${dir}/tasks.md`]: '- [ ] one\n' })
   const card = await readCard(files, ROOT, 'tidy-up', { ...ours, apply: '/work {ticket}' }, null)
   assert.equal(card.stage, 'ready')
-  assert.equal(card.apply.kind, 'none')
+  assert.deepEqual(card.place, {
+    kind: 'none',
+    reason: 'The command needs a ticket, and "tidy-up" does not match the ticket pattern'
+  })
+  assert.deepEqual(card.commands, [])
 })
 
-test('stage table', () => {
+test('stage table: Complete needs every task ticked and no open pull request', () => {
   const tasks = (done: number, total: number) => ({ done, total })
   const cases: [Parameters<typeof stageOf>[0], string][] = [
-    [{ missing: ['design.md'], tasks: tasks(3, 3), pullRequests: [pr('merged')], complete: 'pullRequests' }, 'planning'],
-    [{ missing: [], tasks: tasks(0, 4), pullRequests: null, complete: 'ticks' }, 'ready'],
-    [{ missing: [], tasks: tasks(2, 4), pullRequests: null, complete: 'ticks' }, 'in-progress'],
-    [{ missing: [], tasks: tasks(4, 4), pullRequests: null, complete: 'ticks' }, 'complete'],
-    [{ missing: [], tasks: tasks(2, 4), pullRequests: [pr('open')], complete: 'ticks' }, 'in-review'],
-    [{ missing: [], tasks: tasks(4, 4), pullRequests: [], complete: 'pullRequests' }, 'in-progress'],
-    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('open')], complete: 'pullRequests' }, 'in-review'],
-    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('closed')], complete: 'pullRequests' }, 'complete'],
-    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('closed')], complete: 'pullRequests' }, 'in-progress']
+    [{ missing: ['design.md'], tasks: tasks(3, 3), pullRequests: [pr('merged')] }, 'planning'],
+    [{ missing: [], tasks: tasks(0, 4), pullRequests: null }, 'ready'],
+    [{ missing: [], tasks: tasks(2, 4), pullRequests: null }, 'in-progress'],
+    [{ missing: [], tasks: tasks(4, 4), pullRequests: null }, 'complete'],
+    [{ missing: [], tasks: tasks(4, 4), pullRequests: [pr('open')] }, 'in-review'],
+    [{ missing: [], tasks: tasks(2, 4), pullRequests: [pr('open')] }, 'in-review'],
+    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('open')] }, 'in-review'],
+    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('closed')] }, 'merged'],
+    [{ missing: [], tasks: tasks(4, 4), pullRequests: [pr('merged'), pr('closed')] }, 'complete'],
+    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('closed')] }, 'in-progress'],
+    [{ missing: [], tasks: tasks(0, 4), pullRequests: [] }, 'ready']
   ]
   for (const [input, expected] of cases) {
     assert.equal(stageOf(input), expected, JSON.stringify(input))
   }
+})
+
+test('commands by stage: Finish once the work is in, and from 80% of the tasks in review', () => {
+  const config = { apply: '/work {ticket}', finish: '/close {ticket}' }
+  const ticket = { key: 'PROJ-7', url: null }
+  const names = (stage: Parameters<typeof commandsOf>[0], done: number) =>
+    commandsOf(stage, { done, total: 10 }, config, 'proj-7', ticket).commands.map((command) => command.name)
+  assert.deepEqual(names('planning', 0), [])
+  assert.deepEqual(names('ready', 0), ['apply'])
+  assert.deepEqual(names('in-review', 7), ['apply'])
+  assert.deepEqual(names('in-review', 8), ['apply', 'finish'])
+  assert.deepEqual(names('merged', 3), ['finish'])
+  assert.deepEqual(names('complete', 10), ['finish'])
+  const same = commandsOf('in-review', { done: 9, total: 10 }, { apply: '/work {ticket}', finish: '/work {ticket}' }, 'proj-7', ticket)
+  assert.deepEqual(same.commands, [{ name: 'apply', text: '/work PROJ-7' }])
 })
 
 test('change files: every markdown file, main ones first, excluded folders never walked', async () => {

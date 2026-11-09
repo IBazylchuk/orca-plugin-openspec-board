@@ -22,7 +22,7 @@ import {
   type PanelContext,
   type Tone
 } from 'orca'
-import type { BoardSnapshot, ChangeCard, ChangeRef, PullRequest, Stage } from './protocol'
+import type { BoardSnapshot, ChangeCard, ChangeRef, Command, CommandName, PullRequest, Stage } from './protocol'
 
 const REQUEST = { timeoutMs: 60_000 }
 
@@ -31,8 +31,13 @@ export const STAGES: { stage: Stage; title: string; tone: Tone }[] = [
   { stage: 'ready', title: 'Ready', tone: 'accent' },
   { stage: 'in-progress', title: 'In progress', tone: 'warning' },
   { stage: 'in-review', title: 'In review', tone: 'accent' },
+  { stage: 'merged', title: 'Merged, tasks open', tone: 'warning' },
   { stage: 'complete', title: 'Complete', tone: 'success' }
 ]
+
+export const COMMAND_LABEL: Record<CommandName, string> = { apply: 'Apply', finish: 'Finish' }
+
+const ALL_STAGES = 'all'
 
 const PR_TONE: Record<PullRequest['state'], Tone> = { open: 'accent', merged: 'success', closed: 'neutral' }
 
@@ -59,6 +64,7 @@ const notice = atom<string | null>(null)
 const agents = atom<AgentOption[]>([])
 const workspaceName = atom<string | null>(null)
 const agentChoice = atom('agent', '', { persist: 'workspace' })
+const stageFilter = atom('stage', ALL_STAGES, { persist: 'workspace' })
 const opened = atom<ChangeRef | null>(null)
 const files = atom<{ files: string[]; truncated: boolean } | null>(null)
 const fileChoice = atom('')
@@ -153,10 +159,19 @@ async function edit(ref: ChangeRef, path: string): Promise<void> {
   }
 }
 
-async function apply(ref: ChangeRef): Promise<void> {
+async function run(ref: ChangeRef, command: CommandName): Promise<void> {
   try {
-    const result = await plugin.request('change.apply', { ...ref, terminalId: read(agentChoice) }, REQUEST)
+    const result = await plugin.request('change.run', { ...ref, command, terminalId: read(agentChoice) }, REQUEST)
     set(notice, result.message)
+  } catch (error) {
+    set(notice, messageOf(error))
+  }
+}
+
+async function start(ref: ChangeRef, command: CommandName): Promise<void> {
+  try {
+    set(notice, (await plugin.request('change.start', { ...ref, command }, REQUEST)).message)
+    await load()
   } catch (error) {
     set(notice, messageOf(error))
   }
@@ -189,7 +204,9 @@ const applyBlocker = (): string | null => {
   if (!agent) {
     return 'Pick an agent first'
   }
-  return READY_AGENT_STATES.has(agent.state) ? null : `The agent is ${AGENT_STATE_LABEL[agent.state]}; Apply waits until it stops`
+  return READY_AGENT_STATES.has(agent.state)
+    ? null
+    : `The agent is ${AGENT_STATE_LABEL[agent.state]}; Apply and Finish wait until it stops`
 }
 
 function AgentPicker() {
@@ -197,13 +214,13 @@ function AgentPicker() {
   const name = read(workspaceName)
   const here = name ? `"${name}"` : 'the workspace Orca shows'
   if (options.length === 0) {
-    return <Text muted size="xs">{`No agent runs in ${here}; start one to apply a change.`}</Text>
+    return <Text muted size="xs">{`No agent runs in ${here}; start one to apply or finish a change here.`}</Text>
   }
   const blocker = read(agentChoice) ? applyBlocker() : null
   return (
     <Stack gap="xs">
       <Select
-        label={`Apply sends the command to an agent of ${here}`}
+        label={`Apply and Finish send their command to an agent of ${here}`}
         value={read(agentChoice)}
         placeholder="Pick an agent of this workspace"
         options={options.map(({ value, label }) => ({ value, label }))}
@@ -253,12 +270,70 @@ function GoToWorkspace({ workspaceId, name }: { workspaceId: string; name: strin
       size="sm"
       variant="outline"
       icon="next"
-      tooltip={`Apply runs in this change's own workspace, ${name}`}
+      tooltip={`This change runs in its own workspace, ${name}`}
       onPress={() => goTo(workspaceId)}
     >
       {`Go to ${name}`}
     </Button>
   )
+}
+
+const COMMAND_ICON: Record<CommandName, 'play' | 'check'> = { apply: 'play', finish: 'check' }
+
+function CommandButton({ reference, command }: { reference: ChangeRef; command: Command }) {
+  const blocker = applyBlocker()
+  return (
+    <Button
+      size="sm"
+      icon={COMMAND_ICON[command.name]}
+      variant={command.name === 'apply' ? 'solid' : 'outline'}
+      disabled={blocker !== null}
+      tooltip={blocker ?? `Sends ${command.text}`}
+      onPress={() => run(reference, command.name)}
+    >
+      {COMMAND_LABEL[command.name]}
+    </Button>
+  )
+}
+
+function StartButton({ reference, command, workspace }: { reference: ChangeRef; command: Command; workspace: string }) {
+  return (
+    <Button
+      size="sm"
+      icon={COMMAND_ICON[command.name]}
+      variant="outline"
+      tooltip={`Creates the workspace ${workspace} and starts an agent there with ${command.text}`}
+      onPress={() => start(reference, command.name)}
+    >
+      {`${COMMAND_LABEL[command.name]} in new ${workspace}`}
+    </Button>
+  )
+}
+
+function Actions({ reference, change }: { reference: ChangeRef; change: ChangeCard }) {
+  const place = change.place
+  switch (place.kind) {
+    case 'here':
+      return (
+        <Row gap="xs" wrap>
+          {change.commands.map((command) => (
+            <CommandButton key={command.name} reference={reference} command={command} />
+          ))}
+        </Row>
+      )
+    case 'elsewhere':
+      return <GoToWorkspace workspaceId={place.workspaceId} name={place.workspaceName} />
+    case 'new':
+      return (
+        <Row gap="xs" wrap>
+          {change.commands.map((command) => (
+            <StartButton key={command.name} reference={reference} command={command} workspace={place.workspaceName} />
+          ))}
+        </Row>
+      )
+    case 'none':
+      return null
+  }
 }
 
 function ChangeItem({ workspaceId, change }: { workspaceId: string; change: ChangeCard }) {
@@ -279,30 +354,42 @@ function ChangeItem({ workspaceId, change }: { workspaceId: string; change: Chan
         {change.resume ? <Text size="sm">{`Next: ${change.resume}`}</Text> : null}
         {change.missing.length > 0 ? <Text muted size="xs">{`Missing: ${change.missing.join(', ')}`}</Text> : null}
         <PullRequests change={change} />
-        <Row gap="xs">
+        {change.stage === 'merged' ? (
+          <Text muted size="xs">
+            {`Every pull request is in, but ${change.tasks.total - change.tasks.done} tasks are not ticked. Finish checks what is left.`}
+          </Text>
+        ) : null}
+        <Row gap="xs" wrap>
           <Button size="sm" variant="outline" icon="file-text" onPress={() => open(ref)}>
             Open
           </Button>
-          {change.apply.kind === 'here' ? (
-            <Button
-              size="sm"
-              icon="play"
-              disabled={applyBlocker() !== null}
-              tooltip={applyBlocker() ?? undefined}
-              onPress={() => apply(ref)}
-            >
-              Apply
-            </Button>
-          ) : null}
-          {change.apply.kind === 'elsewhere' ? (
-            <GoToWorkspace workspaceId={change.apply.workspaceId} name={change.apply.workspaceName} />
-          ) : null}
+          <Actions reference={ref} change={change} />
         </Row>
-        {change.apply.kind === 'none' && change.apply.reason ? (
-          <Text muted size="xs">{change.apply.reason}</Text>
+        {change.place.kind === 'none' && change.place.reason ? (
+          <Text muted size="xs">{change.place.reason}</Text>
         ) : null}
       </Stack>
     </Card>
+  )
+}
+
+function StageFilter({ changes }: { changes: ChangeCard[] }) {
+  const chosen = read(stageFilter)
+  const pick = (stage: string) => set(stageFilter, chosen === stage ? ALL_STAGES : stage)
+  return (
+    <Row gap="xs" wrap>
+      <Button size="sm" variant={chosen === ALL_STAGES ? 'solid' : 'outline'} onPress={() => set(stageFilter, ALL_STAGES)}>
+        {`All ${changes.length}`}
+      </Button>
+      {STAGES.map(({ stage, title }) => {
+        const count = changes.filter((change) => change.stage === stage).length
+        return count === 0 ? null : (
+          <Button key={stage} size="sm" variant={chosen === stage ? 'solid' : 'outline'} onPress={() => pick(stage)}>
+            {`${title} ${count}`}
+          </Button>
+        )
+      })}
+    </Row>
   )
 }
 
@@ -313,9 +400,14 @@ function Board({ board }: { board: BoardSnapshot }) {
       <EmptyState icon="info" title="No changes" description="openspec/changes holds no active change." />
     )
   }
+  const chosen = read(stageFilter)
+  const shown = STAGES.some(({ stage }) => stage === chosen && board.changes.some((change) => change.stage === stage))
+    ? STAGES.filter(({ stage }) => stage === chosen)
+    : STAGES
   return (
     <Stack gap="md">
-      {STAGES.map(({ stage, title, tone }) => {
+      <StageFilter changes={board.changes} />
+      {shown.map(({ stage, title, tone }) => {
         const changes = board.changes.filter((change) => change.stage === stage)
         return changes.length === 0 ? null : (
           <Stack key={stage} gap="sm">

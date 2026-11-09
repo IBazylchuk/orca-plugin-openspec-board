@@ -24,7 +24,8 @@ const BOARD: BoardSnapshot = {
           url: 'https://github.com/example-org/app/pull/3'
         }
       ],
-      apply: { kind: 'here' }
+      commands: [{ name: 'apply', text: '/work PROJ-7' }],
+      place: { kind: 'here' }
     },
     {
       name: 'proj-8-sketch',
@@ -34,7 +35,8 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-8', url: null },
       pullRequests: null,
-      apply: { kind: 'none', reason: null }
+      commands: [],
+      place: { kind: 'none', reason: null }
     },
     {
       name: 'proj-9-api',
@@ -44,7 +46,8 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-9', url: null },
       pullRequests: null,
-      apply: { kind: 'elsewhere', workspaceId: 'w2', workspaceName: 'PROJ-9' }
+      commands: [{ name: 'apply', text: '/work PROJ-9' }],
+      place: { kind: 'elsewhere', workspaceId: 'w2', workspaceName: 'PROJ-9' }
     },
     {
       name: 'proj-5-old',
@@ -54,7 +57,19 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-5', url: null },
       pullRequests: null,
-      apply: { kind: 'none', reason: "Apply runs in the change's own workspace: create one named PROJ-5 in Orca" }
+      commands: [{ name: 'apply', text: '/work PROJ-5' }],
+      place: { kind: 'none', reason: "Runs in the change's own workspace: create one named PROJ-5 in Orca" }
+    },
+    {
+      name: 'proj-4-shipped',
+      stage: 'merged',
+      missing: [],
+      tasks: { done: 3, total: 5 },
+      resume: null,
+      ticket: { key: 'PROJ-4', url: null },
+      pullRequests: null,
+      commands: [{ name: 'finish', text: '/close PROJ-4' }],
+      place: { kind: 'new', workspaceName: 'PROJ-4' }
     }
   ]
 }
@@ -75,9 +90,13 @@ function hostWith(applied: unknown[], state = 'waiting') {
       'board.get': () => BOARD,
       'change.files': () => ({ files: ['proposal.md', 'tasks.md'], truncated: false }),
       'change.read': ({ path }) => ({ text: `# ${path}` }),
-      'change.apply': (input) => {
+      'change.run': (input) => {
         applied.push(input)
         return { sent: true, message: 'Sent /work PROJ-7' }
+      },
+      'change.start': (input) => {
+        applied.push(input)
+        return { started: true, message: 'Created PROJ-4; claude got /close PROJ-4' }
       },
       'workspace.go': (input) => {
         applied.push(input)
@@ -106,7 +125,7 @@ test('apply goes to the only agent; a planning change has no Apply', async () =>
   const buttons = view.findAll({ text: 'Apply' })
   assert.equal(buttons.length, 1)
   await view.press(buttons[0])
-  assert.deepEqual(applied, [{ workspaceId: 'w1', change: 'proj-7-dark-mode', terminalId: 't1' }])
+  assert.deepEqual(applied, [{ workspaceId: 'w1', change: 'proj-7-dark-mode', command: 'apply', terminalId: 't1' }])
   assert.ok(view.find({ text: 'Sent /work PROJ-7' }))
   await view.unmount()
 })
@@ -122,9 +141,31 @@ test('a change of another task offers its own workspace, never Apply here', asyn
   await view.unmount()
 })
 
+test('a merged change with open tasks says so and finishes in a new workspace of its own', async () => {
+  const applied: unknown[] = []
+  const view = await mount(panel, { host: hostWith(applied) })
+  assert.ok(view.find({ text: 'Merged, tasks open' }))
+  assert.ok(view.find({ text: /2 tasks are not ticked/ }))
+  await view.press({ text: 'Finish in new PROJ-4' })
+  assert.deepEqual(applied, [{ workspaceId: 'w1', change: 'proj-4-shipped', command: 'finish' }])
+  assert.ok(view.find({ text: 'Created PROJ-4; claude got /close PROJ-4' }))
+  await view.unmount()
+})
+
+test('stage buttons count the changes and show one stage at a time', async () => {
+  const view = await mount(panel, { host: hostWith([]) })
+  assert.ok(view.find({ text: 'All 5' }))
+  await view.press({ text: 'Ready 2' })
+  assert.ok(view.find({ text: 'PROJ-9' }))
+  assert.equal(view.find({ text: 'PROJ-7' }), null)
+  await view.press({ text: 'Ready 2' })
+  assert.ok(view.find({ text: 'PROJ-7' }))
+  await view.unmount()
+})
+
 test('the agent is named by its kind, its state and its own title without the status parts', async () => {
   const view = await mount(panel, { host: hostWith([]) })
-  const picker = view.find({ label: 'Apply sends the command to an agent of "PROJ-7"' })
+  const picker = view.find({ label: 'Apply and Finish send their command to an agent of "PROJ-7"' })
   assert.deepEqual(picker?.props.options, [{ value: 't1', label: 'Claude, waiting for you — "app"' }])
   await view.unmount()
 })
@@ -142,7 +183,7 @@ test('Apply is disabled while the agent is busy or waits for an approval', async
     const view = await mount(panel, { host: hostWith(applied, state) })
     const apply = view.find({ text: 'Apply' })
     assert.equal(apply?.disabled, true, state)
-    assert.ok(view.find({ text: /Apply waits until it stops/ }), state)
+    assert.ok(view.find({ text: /Apply and Finish wait until it stops/ }), state)
     assert.deepEqual(applied, [])
     await view.unmount()
   }
