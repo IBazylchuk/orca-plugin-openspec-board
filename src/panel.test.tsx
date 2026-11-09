@@ -39,11 +39,16 @@ const BOARD: BoardSnapshot = {
   ]
 }
 
-function hostWith(applied: unknown[]) {
+function hostWith(applied: unknown[], state = 'waiting') {
   return mockHost({
     results: {
       'agents.list': {
-        agents: [{ terminalId: 't1', title: 'claude', agent: 'claude', state: 'waiting', stateStartedAt: 0 }]
+        agents: [{ terminalId: 't1', title: 'app: working', agent: 'claude', state, stateStartedAt: 0 }]
+      },
+      'workspace.readContext': {
+        branch: 'main',
+        displayName: 'PROJ-7',
+        terminals: [{ id: 't1', title: '⚪ app: working' }]
       }
     },
     requests: {
@@ -80,6 +85,31 @@ test('apply goes to the only agent; a planning change has no Apply', async () =>
   assert.deepEqual(applied, [{ workspaceId: 'w1', change: 'proj-7-dark-mode', terminalId: 't1' }])
   assert.ok(view.find({ text: 'Sent /work PROJ-7' }))
   await view.unmount()
+})
+
+test('the agent is named by its kind, its state and its own title without the status parts', async () => {
+  const view = await mount(panel, { host: hostWith([]) })
+  const picker = view.find({ label: 'Apply sends the command to an agent of "PROJ-7"' })
+  assert.deepEqual(picker?.props.options, [{ value: 't1', label: 'Claude, waiting for you — "app"' }])
+  await view.unmount()
+})
+
+test('status glyphs and a trailing state are cut from an agent title', () => {
+  assert.equal(panel.cleanTitle('⚪ claude: done'), 'claude')
+  assert.equal(panel.cleanTitle('✳ working'), 'working')
+  assert.equal(panel.cleanTitle(null), '')
+})
+
+test('Apply is disabled while the agent is busy or waits for an approval', async () => {
+  for (const state of ['working', 'blocked']) {
+    const applied: unknown[] = []
+    const view = await mount(panel, { host: hostWith(applied, state) })
+    const apply = view.find({ text: 'Apply' })
+    assert.equal(apply?.disabled, true, state)
+    assert.ok(view.find({ text: /Apply waits until it stops/ }), state)
+    assert.deepEqual(applied, [])
+    await view.unmount()
+  }
 })
 
 test('opening a change shows its first file and goes back to the board', async () => {

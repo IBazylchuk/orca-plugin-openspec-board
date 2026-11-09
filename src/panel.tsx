@@ -36,11 +36,28 @@ export const STAGES: { stage: Stage; title: string; tone: Tone }[] = [
 
 const PR_TONE: Record<PullRequest['state'], Tone> = { open: 'accent', merged: 'success', closed: 'neutral' }
 
+type AgentState = 'working' | 'blocked' | 'waiting' | 'done'
+
+export const AGENT_STATE_LABEL: Record<AgentState, string> = {
+  working: 'busy',
+  blocked: 'needs your approval',
+  waiting: 'waiting for you',
+  done: 'finished'
+}
+
+const READY_AGENT_STATES = new Set<AgentState>(['waiting', 'done'])
+
+interface AgentOption {
+  value: string
+  label: string
+  state: AgentState
+}
 
 const snapshot = atom<BoardSnapshot | null>(null)
 const failure = atom<string | null>(null)
 const notice = atom<string | null>(null)
-const agents = atom<{ value: string; label: string }[]>([])
+const agents = atom<AgentOption[]>([])
+const workspaceName = atom<string | null>(null)
 const agentChoice = atom('agent', '', { persist: 'workspace' })
 const opened = atom<ChangeRef | null>(null)
 const files = atom<{ files: string[]; truncated: boolean } | null>(null)
@@ -58,12 +75,37 @@ async function load(fresh = false): Promise<void> {
   }
 }
 
+const LEADING_STATUS_GLYPHS = /^[^\p{L}\p{N}]+/u
+const TRAILING_STATE = /:\s*(working|done|waiting|blocked|idle)\b.*$/i
+
+export const cleanTitle = (title: string | null | undefined): string =>
+  (title ?? '').replace(LEADING_STATUS_GLYPHS, '').replace(TRAILING_STATE, '').trim()
+
+const agentKind = (agent: string | null): string =>
+  agent ? agent.charAt(0).toUpperCase() + agent.slice(1) : 'Agent'
+
 async function loadAgents(): Promise<void> {
   try {
-    const listed = (await host.call('agents.list')).agents
-    const options = listed.flatMap((agent) =>
-      agent.terminalId ? [{ value: agent.terminalId, label: `${agent.title ?? agent.agent ?? 'Agent'} (${agent.state})` }] : []
-    )
+    const [{ agents: listed }, context] = await Promise.all([
+      host.call('agents.list'),
+      host.call('workspace.readContext')
+    ])
+    set(workspaceName, context?.displayName ?? null)
+    const terminalTitles = new Map((context?.terminals ?? []).map((terminal) => [terminal.id, terminal.title]))
+    const options = listed.flatMap((agent): AgentOption[] => {
+      if (!agent.terminalId) {
+        return []
+      }
+      const title = cleanTitle(terminalTitles.get(agent.terminalId) ?? agent.title)
+      const named = title ? ` — "${title}"` : ''
+      return [
+        {
+          value: agent.terminalId,
+          label: `${agentKind(agent.agent)}, ${AGENT_STATE_LABEL[agent.state]}${named}`,
+          state: agent.state
+        }
+      ]
+    })
     set(agents, options)
     if (!options.some((option) => option.value === read(agentChoice))) {
       set(agentChoice, options.length === 1 ? options[0].value : '')
@@ -140,19 +182,35 @@ export function setup(ctx: PanelContext): void {
   )
 }
 
+const chosenAgent = (): AgentOption | undefined => read(agents).find((agent) => agent.value === read(agentChoice))
+
+const applyBlocker = (): string | null => {
+  const agent = chosenAgent()
+  if (!agent) {
+    return 'Pick an agent first'
+  }
+  return READY_AGENT_STATES.has(agent.state) ? null : `The agent is ${AGENT_STATE_LABEL[agent.state]}; Apply waits until it stops`
+}
+
 function AgentPicker() {
   const options = read(agents)
+  const name = read(workspaceName)
+  const here = name ? `"${name}"` : 'the workspace Orca shows'
   if (options.length === 0) {
-    return <Text muted size="xs">Start an agent in this workspace to apply a change.</Text>
+    return <Text muted size="xs">{`No agent runs in ${here}; start one to apply a change.`}</Text>
   }
+  const blocker = read(agentChoice) ? applyBlocker() : null
   return (
-    <Select
-      label="Send Apply to"
-      value={read(agentChoice)}
-      placeholder="Pick an agent terminal"
-      options={options}
-      onChange={(value) => set(agentChoice, value)}
-    />
+    <Stack gap="xs">
+      <Select
+        label={`Apply sends the command to an agent of ${here}`}
+        value={read(agentChoice)}
+        placeholder="Pick an agent of this workspace"
+        options={options.map(({ value, label }) => ({ value, label }))}
+        onChange={(value) => set(agentChoice, value)}
+      />
+      {blocker ? <Text muted size="xs">{blocker}</Text> : null}
+    </Stack>
   )
 }
 
@@ -204,7 +262,13 @@ function ChangeItem({ workspaceId, change }: { workspaceId: string; change: Chan
             Open
           </Button>
           {change.applicable ? (
-            <Button size="sm" icon="play" disabled={!read(agentChoice)} onPress={() => apply(ref)}>
+            <Button
+              size="sm"
+              icon="play"
+              disabled={applyBlocker() !== null}
+              tooltip={applyBlocker() ?? undefined}
+              onPress={() => apply(ref)}
+            >
               Apply
             </Button>
           ) : null}
