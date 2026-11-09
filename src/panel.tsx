@@ -195,19 +195,32 @@ async function start(ref: ChangeRef, command: CommandName): Promise<void> {
 
 const SETTLED_AGENT_STATES = new Set(['waiting', 'done'])
 
+export const RECHECK_MS = 30_000
+
+function refreshOpened(): void {
+  const change = read(opened)
+  if (change) {
+    void loadTasks(change)
+    if (read(fileChoice)) {
+      void choose(change, read(fileChoice))
+    }
+  }
+}
+
 export function setup(ctx: PanelContext): void {
   void load()
   void loadAgents()
+  const recheck = setInterval(() => {
+    if (read(ctx.visible)) {
+      void load()
+      refreshOpened()
+    }
+  }, RECHECK_MS)
   ctx.subscriptions.push(
+    { dispose: () => clearInterval(recheck) },
     plugin.on('board.changed', () => {
       void load()
-      const change = read(opened)
-      if (change) {
-        void loadTasks(change)
-        if (read(fileChoice)) {
-          void choose(change, read(fileChoice))
-        }
-      }
+      refreshOpened()
     }),
     on('workspace.changed', () => {
       set(opened, null)

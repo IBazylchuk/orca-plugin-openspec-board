@@ -29,7 +29,8 @@ tracker to keep in sync.
 - **Stage filter**: buttons at the top count the changes in each stage and show one
   stage at a time.
 - **Live**: the board redraws when a file under `openspec/changes` changes, an agent
-  stops, or you switch workspaces.
+  stops, or you switch workspaces, and rechecks every 30 seconds while it is visible
+  (Orca stops an idle worker, and its file watch with it).
 - **Next step**: the `Next:` paragraph of `tasks.md`, so you resume where the last
   session stopped.
 - **Tickets**: a link to the ticket for each change, from a pattern on the folder name
