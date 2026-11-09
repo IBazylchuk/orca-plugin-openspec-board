@@ -40,7 +40,7 @@ const SEARCH_OUTPUT = JSON.stringify([
   }
 ])
 
-function setUp(agents: { terminalId: string | null }[] = [{ terminalId: 't1' }]) {
+function setUp(agents: { terminalId: string | null }[] = [{ terminalId: 't1' }], searchOutput: string | null = SEARCH_OUTPUT) {
   const runs: string[][] = []
   const host = mockHost({
     results: {
@@ -65,7 +65,7 @@ function setUp(agents: { terminalId: string | null }[] = [{ terminalId: 't1' }])
     ...fakeFiles(TREE),
     run: async (command: string, args: string[]) => {
       runs.push([command, ...args])
-      return command === 'orca' ? JSON.stringify({ ok: true }) : SEARCH_OUTPUT
+      return command === 'orca' ? JSON.stringify({ ok: true }) : searchOutput
     }
   }
   const main = { default: (orca: OrcaWorkerApi) => register(orca, io) }
@@ -88,6 +88,16 @@ test('board: stages, resume line, ticket and pull requests of the focused worksp
   )
   assert.deepEqual(runs.map((run) => run[run.length - 1]), ['PROJ-10 OR PROJ-7 OR PROJ-8 OR PROJ-9'])
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a failed pull request search never makes a ticked change Complete', async () => {
+  const { host, main } = setUp(undefined, null)
+  const worker = await mountWorker(main, { host })
+  const board = await worker.request('board.get', undefined)
+  const done = board.changes.find((card) => card.name === 'proj-10-done')
+  assert.equal(done?.stage, 'in-progress')
+  assert.equal(done?.pullRequestsUnknown, true)
   await worker.deactivate()
 })
 

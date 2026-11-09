@@ -232,6 +232,9 @@ function AgentPicker() {
 }
 
 function PullRequests({ change }: { change: ChangeCard }) {
+  if (change.pullRequestsUnknown) {
+    return <Text muted size="xs">Pull requests could not be checked, so the stage ignores them; Refresh to retry.</Text>
+  }
   if (change.pullRequests === null || change.pullRequests.length === 0) {
     return null
   }

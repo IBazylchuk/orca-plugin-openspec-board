@@ -34,6 +34,7 @@ export interface ChangeCard {
   resume: string | null
   ticket: Ticket | null
   pullRequests: PullRequest[] | null
+  pullRequestsUnknown: boolean
   commands: Command[]
   place: Place
 }

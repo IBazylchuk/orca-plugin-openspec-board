@@ -32,7 +32,9 @@ writes a file.
 | Merged, tasks open | Every pull request is closed and one is merged, but some tasks are not ticked: either work is left or `tasks.md` is behind |
 | Complete | Every task ticked and no pull request open |
 
-A merged pull request alone never makes a change Complete: the tasks say what the change
+When pull requests are configured but the search fails before any result was kept, the
+card says so and the change is never shown as Complete. A merged pull request alone never
+makes a change Complete: the tasks say what the change
 promised, and a change whose pull requests are in but whose tasks are open is the one
 that silently stalls.
 

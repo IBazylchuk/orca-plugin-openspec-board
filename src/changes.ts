@@ -62,7 +62,12 @@ export function ticketOf(change: string, config: BoardConfig): Ticket | null {
   return { key, url }
 }
 
-export function stageOf(input: { missing: string[]; tasks: Count; pullRequests: PullRequest[] | null }): Stage {
+export function stageOf(input: {
+  missing: string[]
+  tasks: Count
+  pullRequests: PullRequest[] | null
+  pullRequestsUnknown: boolean
+}): Stage {
   if (input.missing.length > 0) {
     return 'planning'
   }
@@ -70,7 +75,8 @@ export function stageOf(input: { missing: string[]; tasks: Count; pullRequests: 
   if (prs.some((pr) => pr.state === 'open')) {
     return 'in-review'
   }
-  if (input.tasks.total > 0 && input.tasks.done === input.tasks.total) {
+  const allTicked = input.tasks.total > 0 && input.tasks.done === input.tasks.total
+  if (allTicked && !input.pullRequestsUnknown) {
     return 'complete'
   }
   if (prs.some((pr) => pr.state === 'merged')) {
@@ -156,8 +162,9 @@ export async function readCard(
     }
   }
   const tasks = tasksText ? countTasks(tasksText) : { done: 0, total: 0 }
-  const stage = stageOf({ missing, tasks, pullRequests })
   const ticket = ticketOf(name, config)
+  const pullRequestsUnknown = config.pullRequests !== null && ticket !== null && pullRequests === null
+  const stage = stageOf({ missing, tasks, pullRequests, pullRequestsUnknown })
   const { commands, refused } = commandsOf(stage, tasks, config, name, ticket)
   return {
     name,
@@ -167,6 +174,7 @@ export async function readCard(
     resume: resumeLine(tasksText, config.resumeLine),
     ticket,
     pullRequests,
+    pullRequestsUnknown,
     commands,
     place: commands.length > 0 ? { kind: 'here' } : { kind: 'none', reason: refused }
   }

@@ -65,8 +65,22 @@ test('configured project: resume line, ticket and stage by pull requests', async
     [`${dir}/design.md`]: '',
     [`${dir}/tasks.md`]: 'Next: wire the toggle\n\n- [x] one\n- [ ] two\n'
   })
+  const unknown = await readCard(
+    fakeFiles({
+      [`${dir}/proposal.md`]: '',
+      [`${dir}/design.md`]: '',
+      [`${dir}/tasks.md`]: '- [x] one\n'
+    }),
+    ROOT,
+    'proj-7-dark-mode',
+    ours,
+    null
+  )
+  assert.equal(unknown.stage, 'in-progress')
+  assert.equal(unknown.pullRequestsUnknown, true)
   const card = await readCard(files, ROOT, 'proj-7-dark-mode', ours, [pr('open')])
   assert.equal(card.stage, 'in-review')
+  assert.equal(card.pullRequestsUnknown, false)
   assert.equal(card.resume, 'wire the toggle')
   assert.deepEqual(card.ticket, { key: 'PROJ-7', url: 'https://tracker.example.com/browse/PROJ-7' })
   assert.deepEqual(card.place, { kind: 'here' })
@@ -96,17 +110,18 @@ test('a change without a ticket cannot be applied when the command needs one', a
 test('stage table: Complete needs every task ticked and no open pull request', () => {
   const tasks = (done: number, total: number) => ({ done, total })
   const cases: [Parameters<typeof stageOf>[0], string][] = [
-    [{ missing: ['design.md'], tasks: tasks(3, 3), pullRequests: [pr('merged')] }, 'planning'],
-    [{ missing: [], tasks: tasks(0, 4), pullRequests: null }, 'ready'],
-    [{ missing: [], tasks: tasks(2, 4), pullRequests: null }, 'in-progress'],
-    [{ missing: [], tasks: tasks(4, 4), pullRequests: null }, 'complete'],
-    [{ missing: [], tasks: tasks(4, 4), pullRequests: [pr('open')] }, 'in-review'],
-    [{ missing: [], tasks: tasks(2, 4), pullRequests: [pr('open')] }, 'in-review'],
-    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('open')] }, 'in-review'],
-    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('closed')] }, 'merged'],
-    [{ missing: [], tasks: tasks(4, 4), pullRequests: [pr('merged'), pr('closed')] }, 'complete'],
-    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('closed')] }, 'in-progress'],
-    [{ missing: [], tasks: tasks(0, 4), pullRequests: [] }, 'ready']
+    [{ missing: ['design.md'], tasks: tasks(3, 3), pullRequests: [pr('merged')], pullRequestsUnknown: false }, 'planning'],
+    [{ missing: [], tasks: tasks(0, 4), pullRequests: null, pullRequestsUnknown: false }, 'ready'],
+    [{ missing: [], tasks: tasks(2, 4), pullRequests: null, pullRequestsUnknown: false }, 'in-progress'],
+    [{ missing: [], tasks: tasks(4, 4), pullRequests: null, pullRequestsUnknown: false }, 'complete'],
+    [{ missing: [], tasks: tasks(4, 4), pullRequests: [pr('open')], pullRequestsUnknown: false }, 'in-review'],
+    [{ missing: [], tasks: tasks(2, 4), pullRequests: [pr('open')], pullRequestsUnknown: false }, 'in-review'],
+    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('open')], pullRequestsUnknown: false }, 'in-review'],
+    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('merged'), pr('closed')], pullRequestsUnknown: false }, 'merged'],
+    [{ missing: [], tasks: tasks(4, 4), pullRequests: [pr('merged'), pr('closed')], pullRequestsUnknown: false }, 'complete'],
+    [{ missing: [], tasks: tasks(1, 4), pullRequests: [pr('closed')], pullRequestsUnknown: false }, 'in-progress'],
+    [{ missing: [], tasks: tasks(0, 4), pullRequests: [], pullRequestsUnknown: false }, 'ready'],
+    [{ missing: [], tasks: tasks(4, 4), pullRequests: null, pullRequestsUnknown: true }, 'in-progress']
   ]
   for (const [input, expected] of cases) {
     assert.equal(stageOf(input), expected, JSON.stringify(input))

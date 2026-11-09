@@ -24,6 +24,7 @@ const BOARD: BoardSnapshot = {
           url: 'https://github.com/example-org/app/pull/3'
         }
       ],
+      pullRequestsUnknown: false,
       commands: [{ name: 'apply', text: '/work PROJ-7' }],
       place: { kind: 'here' }
     },
@@ -35,6 +36,7 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-8', url: null },
       pullRequests: null,
+      pullRequestsUnknown: false,
       commands: [],
       place: { kind: 'none', reason: null }
     },
@@ -46,6 +48,7 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-9', url: null },
       pullRequests: null,
+      pullRequestsUnknown: false,
       commands: [{ name: 'apply', text: '/work PROJ-9' }],
       place: { kind: 'elsewhere', workspaceId: 'w2', workspaceName: 'PROJ-9' }
     },
@@ -57,6 +60,7 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-5', url: null },
       pullRequests: null,
+      pullRequestsUnknown: false,
       commands: [{ name: 'apply', text: '/work PROJ-5' }],
       place: { kind: 'none', reason: "Runs in the change's own workspace: create one named PROJ-5 in Orca" }
     },
@@ -68,6 +72,7 @@ const BOARD: BoardSnapshot = {
       resume: null,
       ticket: { key: 'PROJ-4', url: null },
       pullRequests: null,
+      pullRequestsUnknown: false,
       commands: [{ name: 'finish', text: '/close PROJ-4' }],
       place: { kind: 'new', workspaceName: 'PROJ-4' }
     }
