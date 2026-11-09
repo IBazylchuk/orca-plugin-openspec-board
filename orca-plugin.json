@@ -2,9 +2,24 @@
   "manifestVersion": 2,
   "id": "openspec-board",
   "name": "OpenSpec Board",
-  "version": "0.3.2",
-  "description": "A read-only board of the OpenSpec changes in the focused workspace: stage, task progress, the resume line, the ticket and its pull requests. Apply and Finish send a command you choose to an agent of the change's own workspace, or start that workspace.",
+  "version": "0.3.3",
+  "publisher": "ibazylchuk",
+  "description": "Kanban board for OpenSpec spec-driven development: every change by stage with task progress, next step, ticket and GitHub pull requests. Apply and Finish send /opsx:apply, a finish check or your own command to the Claude Code or Codex agent of the change's own workspace, or start that workspace.",
   "license": "MIT",
+  "cover": {
+    "path": "docs/cover.png",
+    "alt": "OpenSpec Board for Orca: the board panel with changes grouped by stage (demo data)"
+  },
+  "screenshots": [
+    {
+      "path": "docs/screenshot-dark.png",
+      "alt": "The board in dark theme: stage filter buttons, a change in review with its open pull request, and a merged change with Finish (demo data)"
+    },
+    {
+      "path": "docs/screenshot-light.png",
+      "alt": "The board in light theme: stage filter buttons, a change in review with its open pull request, and a merged change with Finish (demo data)"
+    }
+  ],
   "engines": {
     "orca": ">=1.4.248"
   },

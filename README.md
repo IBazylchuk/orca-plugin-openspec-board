@@ -7,9 +7,13 @@ with its task progress, the next step, its ticket and its GitHub pull requests, 
 sends `/opsx:apply`, a finish check or your own command to the agent working on that
 change, in one click.
 
-![OpenSpec Board in Orca: changes grouped by stage with task progress, next step, ticket and Apply buttons (demo data)](docs/board-dark.png)
+![OpenSpec Board in Orca: changes grouped by stage with task progress, next step, ticket and Apply buttons (demo data)](docs/screenshot-dark.png)
 
-*The screenshot uses made-up demo data.*
+<p align="center">
+  <img src="docs/board-light.png" width="300" alt="The whole board in light theme, from Planning to Complete (demo data)">
+</p>
+
+*The screenshots use made-up demo data.*
 
 ## Why
 
