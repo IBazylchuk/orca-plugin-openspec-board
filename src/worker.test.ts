@@ -249,6 +249,15 @@ test('a single open task of this workspace change goes to the agent; done or for
   await worker.deactivate()
 })
 
+test('a restarted worker answers for a change before the panel asked for the board again', async () => {
+  const { host, main } = setUp()
+  const worker = await mountWorker(main, { host })
+  assert.deepEqual(await worker.request('change.tasks', { workspaceId: 'w1', change: 'proj-7-dark-mode' }), {
+    sections: [{ title: '', tasks: [{ text: 'one', done: true }, { text: 'two', done: false }] }]
+  })
+  await worker.deactivate()
+})
+
 test('no focused workspace is a problem, not an error', async () => {
   const { main } = setUp()
   const host = mockHost({ results: { 'workspace.readContext': null } })

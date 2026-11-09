@@ -144,6 +144,9 @@ async function choose(ref: ChangeRef, path: string): Promise<void> {
 async function loadTasks(ref: ChangeRef): Promise<void> {
   try {
     const { sections } = await plugin.request('change.tasks', ref, REQUEST)
+    if (sections === null && read(tasks) !== null) {
+      return
+    }
     set(tasks, sections ?? [])
   } catch (error) {
     set(notice, messageOf(error))
@@ -214,15 +217,13 @@ export function setup(ctx: PanelContext): void {
   void loadAgents()
   const recheck = setInterval(() => {
     if (read(ctx.visible)) {
-      void load()
-      refreshOpened()
+      void load().then(refreshOpened)
     }
   }, RECHECK_MS)
   ctx.subscriptions.push(
     { dispose: () => clearInterval(recheck) },
     plugin.on('board.changed', () => {
-      void load()
-      refreshOpened()
+      void load().then(refreshOpened)
     }),
     on('workspace.changed', () => {
       set(opened, null)

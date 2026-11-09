@@ -150,13 +150,16 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     return { workspaceId: located.workspace.id, changes, problems: located.problems, checkedAt: Date.now() }
   }
 
-  function listed(ref: ChangeRef): { located: Located; card: ChangeCard } | null {
+  async function listed(ref: ChangeRef): Promise<{ located: Located; card: ChangeCard } | null> {
+    if (!current) {
+      await board(false)
+    }
     const card = current?.changes.find((c) => c.name === ref.change)
     return current && card && current.located.workspace.id === ref.workspaceId ? { located: current.located, card } : null
   }
 
   async function fileOf(ref: ChangeRef, path: string): Promise<{ located: Located; path: string } | null> {
-    const found = listed(ref)
+    const found = await listed(ref)
     if (!found) {
       return null
     }
@@ -167,7 +170,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
   orca.panels.handle('board.get', async (input) => board(input?.fresh === true))
 
   orca.panels.handle('change.files', async (ref) => {
-    const found = listed(ref)
+    const found = await listed(ref)
     return found
       ? listChangeFiles(io, found.located.root, ref.change, found.located.config.exclude)
       : { files: [], truncated: false }
@@ -193,7 +196,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
   const commandOf = (card: ChangeCard, name: CommandName) => card.commands.find((command) => command.name === name)
 
   orca.panels.handle('change.run', async ({ workspaceId, change, command, terminalId }) => {
-    const found = listed({ workspaceId, change })
+    const found = await listed({ workspaceId, change })
     if (!found || found.card.place.kind !== 'here') {
       return { sent: false, message: 'That change runs in its own workspace, not from here' }
     }
@@ -210,7 +213,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
   })
 
   orca.panels.handle('change.start', async ({ workspaceId, change, command }) => {
-    const found = listed({ workspaceId, change })
+    const found = await listed({ workspaceId, change })
     const target = found?.card.place
     const chosen = found ? commandOf(found.card, command) : undefined
     if (!found || target?.kind !== 'new' || !chosen) {
@@ -244,13 +247,13 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
   })
 
   orca.panels.handle('change.tasks', async (ref) => {
-    const found = listed(ref)
+    const found = await listed(ref)
     const text = found ? await io.text(`${found.located.root}/changes/${ref.change}/tasks.md`) : null
     return { sections: text === null ? null : taskSections(text) }
   })
 
   orca.panels.handle('task.run', async ({ workspaceId, change, task, terminalId }) => {
-    const found = listed({ workspaceId, change })
+    const found = await listed({ workspaceId, change })
     if (!found || found.card.place.kind !== 'here') {
       return { sent: false, message: 'That change runs in its own workspace, not from here' }
     }
