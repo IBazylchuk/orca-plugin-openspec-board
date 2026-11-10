@@ -59,3 +59,41 @@ test('the old complete setting is reported as no longer read', () => {
   assert.deepEqual(config, DEFAULT_CONFIG)
   assert.equal(problems.length, 1)
 })
+
+test('agent runs are off unless runs is configured', () => {
+  assert.equal(parseConfig(null).config.runs, null)
+  assert.equal(parseConfig('{}').config.runs, null)
+  assert.deepEqual(parseConfig('{"runs": false}'), { config: DEFAULT_CONFIG, problems: [] })
+})
+
+test('runs: true reads the default file and no folders', () => {
+  const { config, problems } = parseConfig('{"runs": true}')
+  assert.deepEqual(problems, [])
+  assert.deepEqual(config.runs, { file: 'agent-runs.jsonl', folders: [] })
+})
+
+test('runs reads its own file name and folders', () => {
+  const { config, problems } = parseConfig(JSON.stringify({ runs: { file: 'spend.jsonl', folders: ['tmp/agent-runs', 'logs'] } }))
+  assert.deepEqual(problems, [])
+  assert.deepEqual(config.runs, { file: 'spend.jsonl', folders: ['tmp/agent-runs', 'logs'] })
+})
+
+test('a runs file outside the change or a folder leaving the workspace is a problem', () => {
+  const unsafeFile = parseConfig(JSON.stringify({ runs: { file: '../runs.jsonl' } }))
+  assert.equal(unsafeFile.problems.length, 1)
+  assert.equal(unsafeFile.config.runs?.file, 'agent-runs.jsonl')
+  for (const folder of ['../outside', '/etc', 'a/../b', 'a//b', './a', 'a/', 'a\\b', '']) {
+    const { config, problems } = parseConfig(JSON.stringify({ runs: { folders: [folder] } }))
+    assert.equal(problems.length, 1, folder)
+    assert.deepEqual(config.runs?.folders, [], folder)
+  }
+  assert.equal(parseConfig(JSON.stringify({ runs: { folders: 'tmp' } })).problems.length, 1)
+})
+
+test('runs of another kind is a problem and leaves the feature off', () => {
+  for (const runs of ['yes', 3, ['x'], null]) {
+    const { config, problems } = parseConfig(JSON.stringify({ runs }))
+    assert.equal(problems.length, 1)
+    assert.equal(config.runs, null)
+  }
+})

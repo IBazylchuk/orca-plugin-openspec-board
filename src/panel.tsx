@@ -22,12 +22,27 @@ import {
   Spinner,
   Stack,
   Tab,
+  Table,
   Tabs,
   Text,
   type PanelContext,
+  type TableRow,
   type Tone
 } from 'orca'
-import type { BoardSnapshot, ChangeCard, ChangeRef, Command, CommandName, PullRequest, Stage, TaskSection } from './protocol'
+import type {
+  BoardSnapshot,
+  ChangeCard,
+  ChangeRef,
+  ChangeSpendDetail,
+  Command,
+  CommandName,
+  PullRequest,
+  Spend,
+  SpendHistory,
+  Stage,
+  TaskSection
+} from './protocol'
+import { formatMinutes, formatMoney, formatTokens, MODELS_ON_CARD, modelLabel, spendLine } from './spend-format'
 
 const REQUEST = { timeoutMs: 60_000 }
 
@@ -75,9 +90,49 @@ const files = atom<{ files: string[]; truncated: boolean } | null>(null)
 const fileChoice = atom('')
 const fileText = atom<string | null>(null)
 const tasks = atom<TaskSection[] | null>(null)
-const view = atom<'tasks' | 'files'>('tasks')
+const VIEWS = ['tasks', 'files', 'runs'] as const
+const view = atom<(typeof VIEWS)[number]>('tasks')
+const spendDetail = atom<ChangeSpendDetail | null>(null)
+const spendShown = atom(false)
+const spendHistoryData = atom<SpendHistory | null>(null)
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+const hasSpend = (ref: ChangeRef): boolean =>
+  read(snapshot)?.changes.some((change) => change.name === ref.change && change.spend !== null) ?? false
+
+async function loadSpendDetail(ref: ChangeRef): Promise<void> {
+  try {
+    const { spend } = await plugin.request('change.spend', ref, REQUEST)
+    set(spendDetail, spend)
+  } catch (error) {
+    set(notice, messageOf(error))
+  }
+}
+
+async function loadSpendHistory(): Promise<void> {
+  try {
+    const { history } = await plugin.request('spend.history', undefined, REQUEST)
+    set(spendHistoryData, history)
+  } catch (error) {
+    set(notice, messageOf(error))
+  }
+}
+
+function toggleSpend(): void {
+  const shown = !read(spendShown)
+  set(spendShown, shown)
+  if (shown) {
+    void loadSpendHistory()
+  }
+}
+
+function refresh(): void {
+  void load(true)
+  if (read(spendShown)) {
+    void loadSpendHistory()
+  }
+}
 
 async function load(fresh = false): Promise<void> {
   try {
@@ -159,10 +214,15 @@ async function open(ref: ChangeRef): Promise<void> {
   set(fileChoice, '')
   set(fileText, null)
   set(tasks, null)
+  set(spendDetail, null)
   set(view, 'tasks')
   set(notice, null)
   try {
-    const [listed] = await Promise.all([plugin.request('change.files', ref, REQUEST), loadTasks(ref)])
+    const [listed] = await Promise.all([
+      plugin.request('change.files', ref, REQUEST),
+      loadTasks(ref),
+      hasSpend(ref) ? loadSpendDetail(ref) : null
+    ])
     set(files, listed)
     if (listed.files[0]) {
       await choose(ref, listed.files[0])
@@ -206,6 +266,9 @@ function refreshOpened(): void {
   const change = read(opened)
   if (change) {
     void loadTasks(change)
+    if (hasSpend(change)) {
+      void loadSpendDetail(change)
+    }
     if (read(fileChoice)) {
       void choose(change, read(fileChoice))
     }
@@ -224,6 +287,9 @@ export function setup(ctx: PanelContext): void {
     { dispose: () => clearInterval(recheck) },
     plugin.on('board.changed', () => {
       void load().then(refreshOpened)
+      if (read(spendShown)) {
+        void loadSpendHistory()
+      }
     }),
     on('workspace.changed', () => {
       set(opened, null)
@@ -399,6 +465,7 @@ function ChangeItem({ workspaceId, change }: { workspaceId: string; change: Chan
         {change.resume ? <Text size="sm">{`Next: ${change.resume}`}</Text> : null}
         {change.missing.length > 0 ? <Text muted size="xs">{`Missing: ${change.missing.join(', ')}`}</Text> : null}
         <PullRequests change={change} />
+        {change.spend ? <Text muted size="xs">{spendLine(change.spend)}</Text> : null}
         {change.stage === 'merged' ? (
           <Text muted size="xs">
             {`Every pull request is in, but ${change.tasks.total - change.tasks.done} tasks are not ticked. Finish checks what is left.`}
@@ -601,6 +668,124 @@ function Files({ change }: { change: ChangeRef }) {
   )
 }
 
+const spendRows = (spends: Spend[], label: (key: string) => string): TableRow[] =>
+  spends.map((spend) => ({
+    key: spend.key,
+    cells: { name: label(spend.key), runs: spend.runs, cost: formatMoney(spend.costUsd) }
+  }))
+
+const spendColumns = (nameLabel: string) =>
+  [
+    { key: 'name', label: nameLabel },
+    { key: 'runs', label: 'Runs', align: 'end' },
+    { key: 'cost', label: 'Cost', align: 'end' }
+  ] as const
+
+const TASK_COLUMNS = [
+  { key: 'task', label: 'Task' },
+  { key: 'runs', label: 'Runs', align: 'end' },
+  { key: 'cost', label: 'Cost', align: 'end' },
+  { key: 'cacheRead', label: 'Cache read', align: 'end', hideBelow: 'md' },
+  { key: 'output', label: 'Output', align: 'end', hideBelow: 'md' },
+  { key: 'minutes', label: 'Minutes', align: 'end', hideBelow: 'sm' },
+  { key: 'failedChecks', label: 'Failed checks', align: 'end', hideBelow: 'sm' },
+  { key: 'escalated', label: 'Escalated', align: 'end', hideBelow: 'sm' }
+] as const
+
+const taskRows = (spends: Spend[]): TableRow[] =>
+  spends.map((spend) => ({
+    key: spend.key,
+    cells: {
+      task: spend.key,
+      runs: spend.runs,
+      cost: formatMoney(spend.costUsd),
+      cacheRead: formatTokens(spend.cacheReadTokens),
+      output: formatTokens(spend.outputTokens),
+      minutes: formatMinutes(spend.durationMs),
+      failedChecks: spend.checkFailures,
+      escalated: spend.escalated
+    }
+  }))
+
+const MODEL_COLUMNS = spendColumns('Model')
+const AGENT_COLUMNS = spendColumns('Agent')
+
+const totalText = (total: Spend): string => `${formatMoney(total.costUsd)} in ${total.runs} runs`
+
+function ChangeRuns() {
+  const detail = read(spendDetail)
+  if (detail === null) {
+    return <Spinner label="Reading agent runs" />
+  }
+  return (
+    <Stack gap="md">
+      <Text>{`Agent runs: ${totalText(detail.total)}`}</Text>
+      <Table label="Agent runs by task" columns={TASK_COLUMNS} rows={taskRows(detail.byTask)} />
+      <Table label="Agent runs by model" columns={MODEL_COLUMNS} rows={spendRows(detail.byModel, modelLabel)} />
+      <Table label="Agent runs by agent type" columns={AGENT_COLUMNS} rows={spendRows(detail.byAgent, (key) => key)} />
+    </Stack>
+  )
+}
+
+const HISTORY_COLUMNS = [
+  { key: 'month', label: 'Month' },
+  { key: 'runs', label: 'Runs', align: 'end' },
+  { key: 'cost', label: 'Cost', align: 'end' },
+  { key: 'cumulative', label: 'Cumulative', align: 'end' },
+  { key: 'models', label: 'Top models', hideBelow: 'md' }
+] as const
+
+function monthRows(history: SpendHistory): TableRow[] {
+  let running = 0
+  return history.months.map((month) => {
+    running += month.total.costUsd
+    return {
+      key: month.month,
+      cells: {
+        month: month.month,
+        runs: month.total.runs,
+        cost: formatMoney(month.total.costUsd),
+        cumulative: formatMoney(running),
+        models: month.byModel
+          .slice(0, MODELS_ON_CARD)
+          .map((model) => `${modelLabel(model.key)} ${formatMoney(model.costUsd)}`)
+          .join(', ')
+      }
+    }
+  })
+}
+
+function SpendHistoryBlock() {
+  const history = read(spendHistoryData)
+  if (history === null) {
+    return <Spinner label="Adding up agent runs" />
+  }
+  if (history.total.runs === 0) {
+    return <Text muted size="xs">No agent runs found.</Text>
+  }
+  return (
+    <Stack gap="sm">
+      <Text>{`Agent spend, all changes: ${totalText(history.total)}`}</Text>
+      <Table label="Spend by model" columns={MODEL_COLUMNS} rows={spendRows(history.byModel, modelLabel)} />
+      <Table label="Spend by month" columns={HISTORY_COLUMNS} rows={monthRows(history)} />
+    </Stack>
+  )
+}
+
+function SpendControl() {
+  const shown = read(spendShown)
+  return (
+    <Stack gap="sm">
+      <Row gap="xs">
+        <Button size="sm" variant={shown ? 'solid' : 'outline'} icon="bar-chart-3" onPress={toggleSpend}>
+          Spend
+        </Button>
+      </Row>
+      {shown ? <SpendHistoryBlock /> : null}
+    </Stack>
+  )
+}
+
 function FileView({ change }: { change: ChangeRef }) {
   const path = read(fileChoice)
   const showing = read(view)
@@ -623,13 +808,18 @@ function FileView({ change }: { change: ChangeRef }) {
       </Row>
       <Heading level={2}>{change.change}</Heading>
       {read(notice) ? <Text muted>{read(notice)}</Text> : null}
-      <Tabs label="Change" value={showing} onChange={(value) => set(view, value === 'files' ? 'files' : 'tasks')}>
+      <Tabs label="Change" value={showing} onChange={(value) => set(view, VIEWS.find((known) => known === value) ?? 'tasks')}>
         <Tab value="tasks" label="Tasks" icon="check">
           <TaskList change={change} />
         </Tab>
         <Tab value="files" label="Files" icon="file-text">
           <Files change={change} />
         </Tab>
+        {hasSpend(change) ? (
+          <Tab value="runs" label="Agent runs" icon="bar-chart-3">
+            <ChangeRuns />
+          </Tab>
+        ) : null}
       </Tabs>
     </Stack>
   )
@@ -645,7 +835,7 @@ export default function Panel() {
     <Stack gap="md">
       <Row justify="between">
         <Heading>OpenSpec</Heading>
-        <Button variant="ghost" icon="refresh" onPress={() => load(true)}>
+        <Button variant="ghost" icon="refresh" onPress={refresh}>
           Refresh
         </Button>
       </Row>
@@ -657,6 +847,7 @@ export default function Panel() {
       ))}
       {read(notice) ? <Text muted>{read(notice)}</Text> : null}
       {board && board.changes.length > 0 ? <AgentPicker /> : null}
+      {board?.spendEnabled ? <SpendControl /> : null}
       {board ? <Board board={board} /> : read(failure) ? null : <Spinner label="Reading OpenSpec changes" />}
     </Stack>
   )

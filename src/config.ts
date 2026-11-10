@@ -9,7 +9,15 @@ export interface PullRequestRule {
   search: string
 }
 
+export interface RunsRule {
+  file: string
+  folders: string[]
+}
+
+export const DEFAULT_RUNS_FILE = 'agent-runs.jsonl'
+
 export interface BoardConfig {
+  runs: RunsRule | null
   requiredArtifacts: string[]
   resumeLine: RegExp | null
   ticket: TicketRule | null
@@ -25,6 +33,7 @@ export interface BoardConfig {
 export const CONFIG_FILE = 'board.json'
 
 export const DEFAULT_CONFIG: BoardConfig = {
+  runs: null,
   requiredArtifacts: ['proposal.md', 'design.md', 'tasks.md', 'specs'],
   resumeLine: null,
   ticket: null,
@@ -92,6 +101,40 @@ function parsePullRequests(raw: unknown, problems: string[]): PullRequestRule | 
     return null
   }
   return { owner: raw.owner, search }
+}
+
+const isSafeSegment = (value: string): boolean => SAFE_PATH_PART.test(value) && value !== '.' && value !== '..'
+
+const isSafeFolder = (value: string): boolean => value.split('/').every(isSafeSegment)
+
+function parseRunsRule(raw: unknown, problems: string[]): RunsRule | null {
+  if (raw === false) {
+    return null
+  }
+  if (raw === true) {
+    return { file: DEFAULT_RUNS_FILE, folders: [] }
+  }
+  if (!isObject(raw)) {
+    problems.push('runs must be true or an object with file and folders')
+    return null
+  }
+  let file = DEFAULT_RUNS_FILE
+  if (raw.file !== undefined) {
+    if (typeof raw.file === 'string' && isSafeSegment(raw.file)) {
+      file = raw.file
+    } else {
+      problems.push(`runs.file must be one file name inside a change, such as "${DEFAULT_RUNS_FILE}"`)
+    }
+  }
+  let folders: string[] = []
+  if (raw.folders !== undefined) {
+    if (isStringList(raw.folders) && raw.folders.every(isSafeFolder)) {
+      folders = raw.folders
+    } else {
+      problems.push('runs.folders must be a list of folders inside the workspace, such as "tmp/agent-runs"')
+    }
+  }
+  return { file, folders }
 }
 
 export function parseConfig(text: string | null): { config: BoardConfig; problems: string[] } {
@@ -163,6 +206,9 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
     } else {
       problems.push('applyAnywhere must be true or false')
     }
+  }
+  if (raw.runs !== undefined) {
+    config.runs = parseRunsRule(raw.runs, problems)
   }
   if (raw.files !== undefined) {
     const exclude = isObject(raw.files) ? raw.files.exclude : undefined

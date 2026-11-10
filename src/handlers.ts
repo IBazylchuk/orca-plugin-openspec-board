@@ -2,8 +2,9 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import { applyText } from './apply'
 import { belongsTo, placeChange, type PlacedWorkspace } from './apply-target'
 import { CONFIG_FILE, parseConfig, type BoardConfig } from './config'
-import { listChangeFiles, listChanges, readCard, taskSections, ticketOf, type Files } from './changes'
+import { ARCHIVE, listChangeFiles, listChanges, readCard, taskSections, ticketOf, type Files } from './changes'
 import { pullRequestFinder, type Runner } from './pull-requests'
+import { changeSpendDetail, parseRuns, spendHistory, type RunRow } from './spend'
 import type { BoardSnapshot, ChangeCard, ChangeRef, CommandName, PullRequest } from './protocol'
 
 export interface Io extends Files {
@@ -25,6 +26,7 @@ interface Located {
 }
 
 const OPENSPEC = 'openspec'
+const RUNS_EXTENSION = '.jsonl'
 
 const isLocal = (workspace: Workspace): boolean => workspace.hostId === null || workspace.hostId === 'local'
 
@@ -122,7 +124,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     const located = await locate()
     if (typeof located === 'string') {
       current = null
-      return { workspaceId: null, changes: [], problems: [located], checkedAt: Date.now() }
+      return { workspaceId: null, changes: [], problems: [located], spendEnabled: false, checkedAt: Date.now() }
     }
     const names = await listChanges(io, located.root)
     if (names === null) {
@@ -131,6 +133,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
         workspaceId: located.workspace.id,
         changes: [],
         problems: [...located.problems, `No ${OPENSPEC}/changes folder in ${located.workspace.name}`],
+        spendEnabled: located.config.runs !== null,
         checkedAt: Date.now()
       }
     }
@@ -147,7 +150,32 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     )
     watchChanges(`${located.root}/changes`)
     current = { located, changes }
-    return { workspaceId: located.workspace.id, changes, problems: located.problems, checkedAt: Date.now() }
+    return {
+      workspaceId: located.workspace.id,
+      changes,
+      problems: located.problems,
+      spendEnabled: located.config.runs !== null,
+      checkedAt: Date.now()
+    }
+  }
+
+  async function historyRows(located: Located, file: string, folders: string[]): Promise<RunRow[]> {
+    const changesPath = `${located.root}/changes`
+    const active = (await listChanges(io, located.root)) ?? []
+    const archived = ((await io.list(`${changesPath}/${ARCHIVE}`)) ?? [])
+      .filter((entry) => entry.directory && !entry.name.startsWith('.'))
+      .map((entry) => `${ARCHIVE}/${entry.name}`)
+    const paths = [...active, ...archived].map((name) => `${changesPath}/${name}/${file}`)
+    for (const folder of folders) {
+      const entries = (await io.list(`${located.workspace.path}/${folder}`)) ?? []
+      for (const entry of entries) {
+        if (!entry.directory && entry.name.endsWith(RUNS_EXTENSION)) {
+          paths.push(`${located.workspace.path}/${folder}/${entry.name}`)
+        }
+      }
+    }
+    const texts = await Promise.all(paths.map((path) => io.text(path)))
+    return texts.flatMap((text) => (text === null ? [] : parseRuns(text)))
   }
 
   async function listed(ref: ChangeRef): Promise<{ located: Located; card: ChangeCard } | null> {
@@ -250,6 +278,24 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     const found = await listed(ref)
     const text = found ? await io.text(`${found.located.root}/changes/${ref.change}/tasks.md`) : null
     return { sections: text === null ? null : taskSections(text) }
+  })
+
+  orca.panels.handle('change.spend', async (ref) => {
+    const found = await listed(ref)
+    const runs = found?.located.config.runs
+    const text = found && runs ? await io.text(`${found.located.root}/changes/${ref.change}/${runs.file}`) : null
+    return { spend: text === null ? null : changeSpendDetail(parseRuns(text)) }
+  })
+
+  orca.panels.handle('spend.history', async () => {
+    const located = await locate()
+    const runs = typeof located === 'string' ? null : located.config.runs
+    return {
+      history:
+        typeof located === 'string' || !runs
+          ? null
+          : spendHistory(await historyRows(located, runs.file, runs.folders))
+    }
   })
 
   orca.panels.handle('task.run', async ({ workspaceId, change, task, terminalId }) => {

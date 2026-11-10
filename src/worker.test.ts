@@ -40,7 +40,11 @@ const SEARCH_OUTPUT = JSON.stringify([
   }
 ])
 
-function setUp(agents: { terminalId: string | null }[] = [{ terminalId: 't1' }], searchOutput: string | null = SEARCH_OUTPUT) {
+function setUp(
+  agents: { terminalId: string | null }[] = [{ terminalId: 't1' }],
+  searchOutput: string | null = SEARCH_OUTPUT,
+  tree: Record<string, string> = TREE
+) {
   const runs: string[][] = []
   const watchers: { path: string; onChange: () => void; stopped: boolean }[] = []
   const host = mockHost({
@@ -63,7 +67,7 @@ function setUp(agents: { terminalId: string | null }[] = [{ terminalId: 't1' }],
     }
   })
   const io = {
-    ...fakeFiles(TREE),
+    ...fakeFiles(tree),
     run: async (command: string, args: string[]) => {
       runs.push([command, ...args])
       return command === 'orca' ? JSON.stringify({ ok: true }) : searchOutput
@@ -264,5 +268,87 @@ test('no focused workspace is a problem, not an error', async () => {
   const worker = await mountWorker(main, { host })
   const board = await worker.request('board.get', undefined)
   assert.deepEqual(board.problems, ['No workspace is focused'])
+  await worker.deactivate()
+})
+
+const RUN_LINE = (fields: Record<string, unknown>): string => `${JSON.stringify(fields)}\n`
+
+const SPEND_TREE = {
+  ...TREE,
+  [`${PATH}/openspec/board.json`]: JSON.stringify({ ...JSON.parse(BOARD_JSON), runs: { folders: ['tmp/agent-runs'] } }),
+  [`${CHANGE}/agent-runs.jsonl`]:
+    RUN_LINE({ at: '2026-01-10T10:00:00Z', model: 'claude-sonnet-5-5', agentType: 'main', task: '1.2', costUsd: 2 }) +
+    RUN_LINE({ at: '2026-01-11T10:00:00Z', model: 'claude-haiku-5-5', agentType: 'Explore', task: '1.10', costUsd: 0.5 }) +
+    'not json\n',
+  [`${PATH}/openspec/changes/archive/2025-12-01-old/agent-runs.jsonl`]: RUN_LINE({
+    at: '2025-12-05T10:00:00Z',
+    model: 'claude-sonnet-5-5',
+    costUsd: 1
+  }),
+  [`${PATH}/tmp/agent-runs/loose.jsonl`]: RUN_LINE({ at: '2026-02-01T10:00:00Z', model: 'claude-haiku-5-5', costUsd: 0.25 }),
+  [`${PATH}/tmp/agent-runs/notes.txt`]: RUN_LINE({ at: '2026-02-01T10:00:00Z', costUsd: 100 })
+}
+
+test('spend: off without runs in board.json, nothing is read or answered', async () => {
+  const { host, main } = setUp(undefined, undefined, {
+    ...SPEND_TREE,
+    [`${PATH}/openspec/board.json`]: BOARD_JSON
+  })
+  const worker = await mountWorker(main, { host })
+  const board = await worker.request('board.get', undefined)
+  assert.equal(board.spendEnabled, false)
+  assert.deepEqual(board.changes.map((card) => card.spend), [null, null, null, null])
+  const ref = { workspaceId: 'w1', change: 'proj-7-dark-mode' }
+  assert.deepEqual(await worker.request('change.spend', ref), { spend: null })
+  assert.deepEqual(await worker.request('spend.history', undefined), { history: null })
+  await worker.deactivate()
+})
+
+test('spend: a card carries the sum of its own file; a change without the file shows nothing', async () => {
+  const { host, main } = setUp(undefined, undefined, SPEND_TREE)
+  const worker = await mountWorker(main, { host })
+  const board = await worker.request('board.get', undefined)
+  assert.equal(board.spendEnabled, true)
+  const spends = Object.fromEntries(board.changes.map((card) => [card.name, card.spend?.total.costUsd ?? null]))
+  assert.deepEqual(spends, { 'proj-10-done': null, 'proj-7-dark-mode': 2.5, 'proj-8-sketch': null, 'proj-9-api': null })
+  assert.deepEqual(
+    board.changes.find((card) => card.name === 'proj-7-dark-mode')?.spend?.byModel.map((model) => model.key),
+    ['claude-sonnet-5-5', 'claude-haiku-5-5']
+  )
+  await worker.deactivate()
+})
+
+test('spend: the detail of a listed change only, by task, model and agent', async () => {
+  const { host, main } = setUp(undefined, undefined, SPEND_TREE)
+  const worker = await mountWorker(main, { host })
+  await worker.request('board.get', undefined)
+  const { spend } = await worker.request('change.spend', { workspaceId: 'w1', change: 'proj-7-dark-mode' })
+  assert.deepEqual(spend?.byTask.map((task) => task.key), ['1.2', '1.10'])
+  assert.deepEqual(spend?.byAgent.map((agent) => agent.key), ['main', 'Explore'])
+  assert.deepEqual(await worker.request('change.spend', { workspaceId: 'w1', change: '..' }), { spend: null })
+  assert.deepEqual(await worker.request('change.spend', { workspaceId: 'w1', change: 'proj-8-sketch' }), { spend: null })
+  await worker.deactivate()
+})
+
+test('spend: history adds active changes, archived changes and the configured folders only', async () => {
+  const { host, main } = setUp(undefined, undefined, SPEND_TREE)
+  const worker = await mountWorker(main, { host })
+  const { history } = await worker.request('spend.history', undefined)
+  assert.equal(history?.total.costUsd, 3.75)
+  assert.equal(history?.total.runs, 4)
+  assert.deepEqual(history?.months.map((month) => [month.month, month.total.costUsd]), [
+    ['2025-12', 1],
+    ['2026-01', 2.5],
+    ['2026-02', 0.25]
+  ])
+  await worker.deactivate()
+})
+
+test('spend: the disk watcher already covers the file, so no second watcher is added', async () => {
+  const { host, main, watchers } = setUp(undefined, undefined, SPEND_TREE)
+  const worker = await mountWorker(main, { host })
+  await worker.request('board.get', undefined)
+  await worker.request('spend.history', undefined)
+  assert.deepEqual(watchers.map((watcher) => watcher.path), [`${PATH}/openspec/changes`])
   await worker.deactivate()
 })

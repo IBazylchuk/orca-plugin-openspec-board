@@ -46,6 +46,8 @@ tracker to keep in sync.
   the agent.
 - **Read the change**: proposal, design and specs rendered in the panel, one click to
   open them in Orca's editor.
+- **Agent spend (optional)**: what a change cost, by task, model and agent type, and a
+  history by month, summed from a JSON Lines file your own tooling writes.
 - **One config file**: `openspec/board.json` describes how your team runs OpenSpec;
   without it the board behaves like plain OpenSpec.
 - **Read-only**: it never writes a file in your repository.
@@ -120,6 +122,7 @@ Archived changes are not shown.
 | `agent` | `claude` | The agent a "… in new" button starts in the new workspace |
 | `applyAnywhere` | `false` | `true` lets Apply send any change to an agent of whatever workspace is focused, instead of only from the change's own workspace |
 | `files.exclude` | none | Folders inside a change that the file list never walks, such as raw research output |
+| `runs` | off | `true`, or `{ "file": "agent-runs.jsonl", "folders": ["tmp/agent-runs"] }`; shows what each change cost, see [Agent spend](#agent-spend-optional) |
 
 Problems in the file show at the top of the board, and the default is used for the
 broken key. The `complete` key of 0.2 is no longer read and is reported until removed.
@@ -150,6 +153,61 @@ Apply and Finish type the command and press Enter. They wait while the chosen ag
 busy or asks for your approval, so the command never lands in the middle of a run. A
 change or ticket name with a control character is refused, so a hostile folder name
 cannot submit a second line.
+
+## Agent spend (optional)
+
+If a tool of yours records every finished agent run, the board can show what a change
+cost. It is off until `runs` is set in `board.json`, and a change without the file shows
+nothing. The board only reads the file and adds the numbers up; it never writes it and
+no agent is involved.
+
+```json
+{ "runs": true }
+```
+
+```json
+{ "runs": { "file": "agent-runs.jsonl", "folders": ["tmp/agent-runs"] } }
+```
+
+- `file` is one file name inside each change folder; the default is `agent-runs.jsonl`.
+- `folders` is optional: folders relative to the workspace root (the folder that holds
+  `openspec/`), each with `*.jsonl` files of the same format, for runs that belong to no
+  change. A path that is absolute or contains `..` is reported as a problem and ignored.
+
+What it shows:
+
+- **On each card**: one line, such as `Agent runs: $12.40 · sonnet-5-5 $7.10 · haiku-5-5 $0.40`,
+  with the three costliest models.
+- **In an opened change**: an "Agent runs" tab with a table by task, one by model and one
+  by agent type.
+- **Spend** button at the top of the board: the total over every active change, every
+  archived change and every configured folder, by model and by month with a running total.
+
+### The file format
+
+`openspec/changes/<change>/agent-runs.jsonl`, one JSON object per line. Any tool may
+write it. Every field is optional, but a line with neither a numeric `costUsd` nor a
+token count is skipped, and so is a line that is not valid JSON. Only the last 20 000
+lines of a file are read.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `at` | ISO time | When the run finished; groups the run by month, `unknown` when missing |
+| `model` | string | Model id, such as `claude-sonnet-5-5` |
+| `agentType` | string | Kind of agent; `main` is the main session |
+| `task` | string | Task number such as `2.3`; runs without one are listed as `no task` |
+| `costUsd` | number | Cost of the run in US dollars |
+| `inputTokens` | number | Input tokens |
+| `cacheWriteTokens` | number | Tokens written to the cache |
+| `cacheReadTokens` | number | Tokens read from the cache |
+| `outputTokens` | number | Output tokens |
+| `durationMs` | number | Run time in milliseconds |
+| `checkFailures` | number | Checks that failed during the run |
+| `isEscalated` | boolean | The run was handed to a stronger model |
+
+```json
+{"at":"2026-01-10T18:56:50.228Z","agentType":"Explore","task":"1.2","model":"claude-haiku-5-5","inputTokens":6,"cacheWriteTokens":33062,"cacheReadTokens":58367,"outputTokens":712,"costUsd":0.0051,"durationMs":11514,"checkFailures":0,"isEscalated":false}
+```
 
 ## Develop
 

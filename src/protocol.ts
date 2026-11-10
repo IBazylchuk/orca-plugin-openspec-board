@@ -26,6 +26,41 @@ export interface Ticket {
   url: string | null
 }
 
+export interface Spend {
+  key: string
+  runs: number
+  costUsd: number
+  inputTokens: number
+  cacheWriteTokens: number
+  cacheReadTokens: number
+  outputTokens: number
+  durationMs: number
+  checkFailures: number
+  escalated: number
+}
+
+export interface ChangeSpend {
+  total: Spend
+  byModel: Spend[]
+}
+
+export interface ChangeSpendDetail extends ChangeSpend {
+  byTask: Spend[]
+  byAgent: Spend[]
+}
+
+export interface SpendMonth {
+  month: string
+  total: Spend
+  byModel: Spend[]
+}
+
+export interface SpendHistory {
+  months: SpendMonth[]
+  total: Spend
+  byModel: Spend[]
+}
+
 export interface ChangeCard {
   name: string
   stage: Stage
@@ -35,6 +70,7 @@ export interface ChangeCard {
   ticket: Ticket | null
   pullRequests: PullRequest[] | null
   pullRequestsUnknown: boolean
+  spend: ChangeSpend | null
   inThisWorkspace: boolean
   commands: Command[]
   place: Place
@@ -60,6 +96,7 @@ export interface BoardSnapshot {
   workspaceId: string | null
   changes: ChangeCard[]
   problems: string[]
+  spendEnabled: boolean
   checkedAt: number
 }
 
@@ -82,6 +119,8 @@ declare module 'orca' {
       input: ChangeRef & { command: CommandName }
       output: { started: boolean; message: string }
     }
+    'change.spend': { input: ChangeRef; output: { spend: ChangeSpendDetail | null } }
+    'spend.history': { input: undefined; output: { history: SpendHistory | null } }
     'workspace.go': { input: { workspaceId: string }; output: { opened: boolean; message: string } }
     'change.tasks': { input: ChangeRef; output: { sections: TaskSection[] | null } }
     'task.run': {

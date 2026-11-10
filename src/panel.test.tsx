@@ -1,10 +1,11 @@
 import { assert, mockHost, mount, test } from 'orca/testing'
 import * as panel from './panel'
-import type { BoardSnapshot } from './protocol'
+import type { BoardSnapshot, Spend } from './protocol'
 
 const BOARD: BoardSnapshot = {
   workspaceId: 'w1',
   problems: [],
+  spendEnabled: false,
   checkedAt: 0,
   changes: [
     {
@@ -25,6 +26,7 @@ const BOARD: BoardSnapshot = {
         }
       ],
       pullRequestsUnknown: false,
+      spend: null,
       inThisWorkspace: true,
       commands: [{ name: 'apply', text: '/work PROJ-7' }],
       place: { kind: 'here' }
@@ -38,6 +40,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-8', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      spend: null,
       inThisWorkspace: false,
       commands: [],
       place: { kind: 'none', reason: null }
@@ -51,6 +54,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-9', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      spend: null,
       inThisWorkspace: false,
       commands: [{ name: 'apply', text: '/work PROJ-9' }],
       place: { kind: 'elsewhere', workspaceId: 'w2', workspaceName: 'PROJ-9' }
@@ -64,6 +68,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-5', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      spend: null,
       inThisWorkspace: false,
       commands: [{ name: 'apply', text: '/work PROJ-5' }],
       place: { kind: 'none', reason: "Runs in the change's own workspace: create one named PROJ-5 in Orca" }
@@ -77,6 +82,7 @@ const BOARD: BoardSnapshot = {
       ticket: { key: 'PROJ-4', url: null },
       pullRequests: null,
       pullRequestsUnknown: false,
+      spend: null,
       inThisWorkspace: false,
       commands: [{ name: 'finish', text: '/close PROJ-4' }],
       place: { kind: 'new', workspaceName: 'PROJ-4' }
@@ -86,7 +92,7 @@ const BOARD: BoardSnapshot = {
 
 const LONG_TASK = `2.5 ${'merged and deployed, checked on production; '.repeat(25)}`
 
-function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it') {
+function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it', board: BoardSnapshot = BOARD) {
   return mockHost({
     results: {
       'agents.list': {
@@ -99,9 +105,11 @@ function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it
       }
     },
     requests: {
-      'board.get': () => BOARD,
+      'board.get': () => board,
       'change.files': () => ({ files: ['proposal.md', 'tasks.md'], truncated: false }),
       'change.read': ({ path }) => ({ text: `# ${path}` }),
+      'change.spend': () => ({ spend: DETAIL }),
+      'spend.history': () => ({ history: HISTORY }),
       'change.tasks': () => ({
         sections: [{ title: '1. Toggle', tasks: [{ text: '1.1 store the flag', done: true }, { text: taskText, done: false }] }]
       }),
@@ -247,6 +255,128 @@ test('opening a change shows its task list, then its files, and goes back to the
   assert.equal(view.find({ type: 'Markdown' })?.props.content, '# proposal.md')
   await view.press({ text: 'Back to board' })
   assert.ok(view.find({ text: 'This workspace' }))
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+const spend = (key: string, runs: number, costUsd: number): Spend => ({
+  key,
+  runs,
+  costUsd,
+  inputTokens: 0,
+  cacheWriteTokens: 0,
+  cacheReadTokens: 58367,
+  outputTokens: 1_200_000,
+  durationMs: 90_000,
+  checkFailures: 1,
+  escalated: 2
+})
+
+const MODELS = [spend('claude-sonnet-5-5', 3, 7.1), spend('claude-fable-5-2', 2, 4.9), spend('claude-haiku-5-5', 4, 0.4)]
+
+const WITH_SPEND: BoardSnapshot = {
+  ...BOARD,
+  spendEnabled: true,
+  changes: BOARD.changes.map((card, index) =>
+    index === 0 ? { ...card, spend: { total: spend('total', 9, 12.4), byModel: MODELS } } : card
+  )
+}
+
+const DETAIL = {
+  total: spend('total', 9, 12.4),
+  byModel: MODELS,
+  byTask: [spend('1.2', 2, 1.5), spend('1.10', 3, 9.9), spend('no task', 4, 1)],
+  byAgent: [spend('main', 5, 11), spend('Explore', 4, 1.4)]
+}
+
+const HISTORY = {
+  total: spend('total', 14, 15.4),
+  byModel: MODELS,
+  months: [
+    { month: '2026-01', total: spend('2026-01', 5, 3), byModel: [spend('claude-haiku-5-5', 5, 3)] },
+    { month: '2026-02', total: spend('2026-02', 9, 12.4), byModel: MODELS }
+  ]
+}
+
+test('no agent runs line and no Spend control while the feature is off', async () => {
+  const view = await mount(panel, { host: hostWith([]) })
+  assert.equal(view.find({ text: /Agent runs/ }), null)
+  assert.equal(view.find({ text: 'Spend' }), null)
+  await view.press(view.findAll({ text: 'Open' })[0])
+  assert.equal(view.find({ label: 'Agent runs' }), null)
+  assert.equal(view.find({ text: 'Agent runs' }), null)
+  await view.unmount()
+})
+
+test('a card with runs shows one quiet line with its models', async () => {
+  const view = await mount(panel, { host: hostWith([], "waiting", "1.2 wire it", WITH_SPEND) })
+  assert.ok(view.find({ text: 'Agent runs: $12.40 · sonnet-5-5 $7.10 · fable-5-2 $4.90 · haiku-5-5 $0.40' }))
+  assert.equal(view.findAll({ text: /^Agent runs:/ }).length, 1)
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+test('the opened change lists its runs by task, model and agent type', async () => {
+  const view = await mount(panel, { host: hostWith([], "waiting", "1.2 wire it", WITH_SPEND) })
+  await view.press(view.findAll({ text: 'Open' })[0])
+  await view.select({ label: 'Change' }, 'runs')
+  const byTask = view.find({ type: 'Table', label: 'Agent runs by task' })
+  assert.deepEqual(byTask?.props.rows, [
+    {
+      key: '1.2',
+      cells: { task: '1.2', runs: 2, cost: '$1.50', cacheRead: '58.4k', output: '1.2M', minutes: '1.5', failedChecks: 1, escalated: 2 }
+    },
+    {
+      key: '1.10',
+      cells: { task: '1.10', runs: 3, cost: '$9.90', cacheRead: '58.4k', output: '1.2M', minutes: '1.5', failedChecks: 1, escalated: 2 }
+    },
+    {
+      key: 'no task',
+      cells: { task: 'no task', runs: 4, cost: '$1.00', cacheRead: '58.4k', output: '1.2M', minutes: '1.5', failedChecks: 1, escalated: 2 }
+    }
+  ])
+  const byModel = view.find({ type: 'Table', label: 'Agent runs by model' })
+  assert.equal((byModel?.props.rows as { cells: { name: string } }[])[0].cells.name, 'sonnet-5-5')
+  const byAgent = view.find({ type: 'Table', label: 'Agent runs by agent type' })
+  assert.deepEqual(byAgent?.props.rows, [
+    { key: 'main', cells: { name: 'main', runs: 5, cost: '$11.00' } },
+    { key: 'Explore', cells: { name: 'Explore', runs: 4, cost: '$1.40' } }
+  ])
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+test('a change without runs has no Agent runs tab even when the feature is on', async () => {
+  const noRuns: BoardSnapshot = { ...WITH_SPEND, changes: BOARD.changes.map((card) => ({ ...card, spend: null })) }
+  const view = await mount(panel, { host: hostWith([], "waiting", "1.2 wire it", noRuns) })
+  assert.equal(view.find({ text: /^Agent runs:/ }), null)
+  await view.press(view.findAll({ text: 'Open' })[0])
+  assert.equal(view.find({ type: 'Table' }), null)
+  await view.unmount()
+})
+
+test('Spend shows the grand total, the models and the months with a running total', async () => {
+  const view = await mount(panel, { host: hostWith([], "waiting", "1.2 wire it", WITH_SPEND) })
+  assert.equal(view.find({ type: 'Table', label: 'Spend by month' }), null)
+  await view.press({ text: 'Spend' })
+  assert.ok(view.find({ text: 'Agent spend, all changes: $15.40 in 14 runs' }))
+  const months = view.find({ type: 'Table', label: 'Spend by month' })
+  assert.deepEqual(months?.props.rows, [
+    { key: '2026-01', cells: { month: '2026-01', runs: 5, cost: '$3.00', cumulative: '$3.00', models: 'haiku-5-5 $3.00' } },
+    {
+      key: '2026-02',
+      cells: {
+        month: '2026-02',
+        runs: 9,
+        cost: '$12.40',
+        cumulative: '$15.40',
+        models: 'sonnet-5-5 $7.10, fable-5-2 $4.90, haiku-5-5 $0.40'
+      }
+    }
+  ])
+  assert.equal((view.find({ type: 'Table', label: 'Spend by model' })?.props.rows as unknown[]).length, 3)
+  await view.press({ text: 'Spend' })
+  assert.equal(view.find({ type: 'Table', label: 'Spend by month' }), null)
   assert.deepEqual(view.errors, [])
   await view.unmount()
 })

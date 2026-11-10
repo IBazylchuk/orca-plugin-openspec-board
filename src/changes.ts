@@ -1,5 +1,6 @@
 import { applyText } from './apply'
 import type { BoardConfig } from './config'
+import { changeSpend, parseRuns } from './spend'
 import type { ChangeCard, Command, CommandName, Count, PullRequest, Stage, TaskSection, Ticket } from './protocol'
 
 export interface Entry {
@@ -162,10 +163,11 @@ export async function readCard(
   pullRequests: PullRequest[] | null
 ): Promise<ChangeCard> {
   const dir = `${changesDir(root)}/${name}`
-  const [entries, tasksText, meta] = await Promise.all([
+  const [entries, tasksText, meta, runsText] = await Promise.all([
     files.list(dir),
     files.text(`${dir}/tasks.md`),
-    files.text(`${dir}/.openspec.yaml`)
+    files.text(`${dir}/.openspec.yaml`),
+    config.runs ? files.text(`${dir}/${config.runs.file}`) : null
   ])
   const present = new Map((entries ?? []).map((entry) => [entry.name, entry]))
   const skipSpecs = SKIP_SPECS.test(meta ?? '')
@@ -192,6 +194,7 @@ export async function readCard(
     ticket,
     pullRequests,
     pullRequestsUnknown,
+    spend: runsText === null ? null : changeSpend(parseRuns(runsText)),
     inThisWorkspace: false,
     commands,
     place: commands.length > 0 ? { kind: 'here' } : { kind: 'none', reason: refused }
