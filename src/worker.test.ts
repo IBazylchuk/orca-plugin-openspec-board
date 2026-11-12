@@ -87,7 +87,7 @@ function setUp(
 test('board: stages, resume line, ticket and pull requests of the focused workspace', async () => {
   const { host, runs, main } = setUp()
   const worker = await mountWorker(main, { host })
-  const board = await worker.request('board.get', undefined)
+  const board = await worker.request('board.pullRequests', undefined)
   assert.deepEqual(board.problems, [])
   assert.deepEqual(
     board.changes.map((card) => [card.name, card.stage, card.ticket?.key, card.resume, card.place.kind]),
@@ -100,6 +100,23 @@ test('board: stages, resume line, ticket and pull requests of the focused worksp
   )
   assert.deepEqual(runs.map((run) => run[run.length - 1]), ['PROJ-10 OR PROJ-7 OR PROJ-8 OR PROJ-9'])
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('board.get answers from the cache and never starts gh', async () => {
+  const { host, runs, main } = setUp()
+  const worker = await mountWorker(main, { host })
+  const first = await worker.request('board.get', undefined)
+  assert.deepEqual(runs, [])
+  assert.equal(first.pullRequestsPending, true)
+  assert.equal(first.changes.find((card) => card.name === 'proj-7-dark-mode')?.pullRequestsUnknown, true)
+  const looked = await worker.request('board.pullRequests', undefined)
+  assert.equal(looked.pullRequestsPending, false)
+  assert.equal(looked.changes.find((card) => card.name === 'proj-7-dark-mode')?.stage, 'in-review')
+  const again = await worker.request('board.get', undefined)
+  assert.equal(runs.length, 1)
+  assert.equal(again.pullRequestsPending, false)
+  assert.equal(again.changes.find((card) => card.name === 'proj-7-dark-mode')?.stage, 'in-review')
   await worker.deactivate()
 })
 
@@ -179,7 +196,7 @@ test('a change of another task is never typed into this workspace; its own works
 test('a change without its own workspace starts one with an agent that gets the command', async () => {
   const { host, runs, main } = setUp()
   const worker = await mountWorker(main, { host })
-  await worker.request('board.get', undefined)
+  await worker.request('board.pullRequests', undefined)
   const ref = { workspaceId: 'w1', change: 'proj-10-done' }
   assert.equal((await worker.request('change.start', { ...ref, command: 'apply' })).started, false)
   assert.equal((await worker.request('change.start', { workspaceId: 'w1', change: 'proj-9-api', command: 'apply' })).started, false)

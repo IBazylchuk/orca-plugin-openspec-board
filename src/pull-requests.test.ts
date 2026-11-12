@@ -1,5 +1,5 @@
 import { assert, test } from 'orca/testing'
-import { CACHE_MS, mentionsKey as mentionsTicket, parseSearch, pullRequestFinder, pullRequestsOf, TICKETS_PER_SEARCH } from './pull-requests'
+import { CACHE_MS, FAILURE_MS, GH_TIMEOUT_MS, PARALLEL_SEARCHES, mentionsKey as mentionsTicket, parseSearch, pullRequestFinder, pullRequestsOf, TICKETS_PER_SEARCH } from './pull-requests'
 
 const row = (number: number, title: string, state = 'open') => ({
   number,
@@ -79,4 +79,65 @@ test('a failed search keeps what the last one found', async () => {
   clock = CACHE_MS
   assert.deepEqual((await find(rule, ['PROJ-1'])).get('PROJ-1')?.length, 1)
   assert.equal((await find(rule, ['PROJ-2'])).get('PROJ-2'), null)
+})
+
+test('searches run in parallel up to the cap, each with the gh timeout', async () => {
+  let running = 0
+  let peak = 0
+  const timeouts: (number | undefined)[] = []
+  const find = pullRequestFinder(async (_command, _args, timeoutMs) => {
+    timeouts.push(timeoutMs)
+    running += 1
+    peak = Math.max(peak, running)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    running -= 1
+    return '[]'
+  })
+  const tickets = Array.from({ length: TICKETS_PER_SEARCH * (PARALLEL_SEARCHES + 2) }, (_, index) => `PROJ-${index + 1}`)
+  await find(rule, tickets)
+  assert.equal(timeouts.length, PARALLEL_SEARCHES + 2)
+  assert.equal(peak, PARALLEL_SEARCHES)
+  assert.deepEqual([...new Set(timeouts)], [GH_TIMEOUT_MS])
+})
+
+test('a search that hits its timeout answers null and leaves the tickets unknown', async () => {
+  const find = pullRequestFinder(async () => null)
+  const found = await find(rule, ['PROJ-1', 'PROJ-2'])
+  assert.equal(found.get('PROJ-1'), null)
+  assert.equal(found.get('PROJ-2'), null)
+})
+
+test('a failed search is not repeated for a minute, a fresh look repeats it', async () => {
+  let calls = 0
+  let clock = 0
+  const find = pullRequestFinder(
+    async () => {
+      calls += 1
+      return null
+    },
+    () => clock
+  )
+  await find(rule, ['PROJ-1'])
+  await find(rule, ['PROJ-1'])
+  assert.equal(calls, 1)
+  clock = FAILURE_MS - 1
+  await find(rule, ['PROJ-1'])
+  assert.equal(calls, 1)
+  clock = FAILURE_MS
+  await find(rule, ['PROJ-1'])
+  assert.equal(calls, 2)
+  await find(rule, ['PROJ-1'], true)
+  assert.equal(calls, 3)
+})
+
+test('remembered answers from the cache without a search', async () => {
+  let calls = 0
+  const find = pullRequestFinder(async () => {
+    calls += 1
+    return JSON.stringify([row(1, 'PROJ-1: one')])
+  })
+  assert.equal(find.remembered(rule, ['PROJ-1']).get('PROJ-1'), null)
+  await find(rule, ['PROJ-1'])
+  assert.equal(find.remembered(rule, ['PROJ-1']).get('PROJ-1')?.length, 1)
+  assert.equal(calls, 1)
 })

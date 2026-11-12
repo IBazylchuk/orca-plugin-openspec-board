@@ -97,6 +97,7 @@ export interface BoardSnapshot {
   changes: ChangeCard[]
   problems: string[]
   spendEnabled: boolean
+  pullRequestsPending: boolean
   checkedAt: number
 }
 
@@ -108,6 +109,7 @@ export interface ChangeRef {
 declare module 'orca' {
   interface PluginRequests {
     'board.get': { input: { fresh?: boolean } | undefined; output: BoardSnapshot }
+    'board.pullRequests': { input: { fresh?: boolean } | undefined; output: BoardSnapshot }
     'change.files': { input: ChangeRef; output: { files: string[]; truncated: boolean } }
     'change.read': { input: ChangeRef & { path: string }; output: { text: string | null } }
     'change.edit': { input: ChangeRef & { path: string }; output: { opened: boolean; message: string } }

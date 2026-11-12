@@ -26,12 +26,12 @@ export const diskIo: Io = {
       return null
     }
   },
-  run: (command, args) =>
+  run: (command, args, timeoutMs = RUN_TIMEOUT_MS) =>
     new Promise((resolve) => {
       execFile(
         command,
         args,
-        { env: { ...process.env, PATH }, timeout: RUN_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
+        { env: { ...process.env, PATH }, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES },
         (error, stdout) => resolve(error ? null : stdout)
       )
     }),

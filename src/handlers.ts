@@ -90,10 +90,19 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     return { workspace: focused, others, root, config, problems }
   }
 
-  async function lookUp(located: Located, names: string[], fresh: boolean): Promise<Map<string, PullRequest[] | null>> {
+  async function lookUp(
+    located: Located,
+    names: string[],
+    search: { fresh: boolean } | null
+  ): Promise<Map<string, PullRequest[] | null>> {
     const rule = located.config.pullRequests
     const tickets = names.flatMap((name) => ticketOf(name, located.config)?.key ?? [])
-    const found = rule && tickets.length > 0 ? await findPullRequests(rule, tickets, fresh) : new Map()
+    const found =
+      rule && tickets.length > 0
+        ? search
+          ? await findPullRequests(rule, tickets, search.fresh)
+          : findPullRequests.remembered(rule, tickets)
+        : new Map()
     return new Map(names.map((name) => [name, found.get(ticketOf(name, located.config)?.key ?? '') ?? null]))
   }
 
@@ -120,11 +129,18 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     })
   }
 
-  async function board(fresh: boolean): Promise<BoardSnapshot> {
+  async function board(search: { fresh: boolean } | null): Promise<BoardSnapshot> {
     const located = await locate()
     if (typeof located === 'string') {
       current = null
-      return { workspaceId: null, changes: [], problems: [located], spendEnabled: false, checkedAt: Date.now() }
+      return {
+        workspaceId: null,
+        changes: [],
+        problems: [located],
+        spendEnabled: false,
+        pullRequestsPending: false,
+        checkedAt: Date.now()
+      }
     }
     const names = await listChanges(io, located.root)
     if (names === null) {
@@ -134,10 +150,11 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
         changes: [],
         problems: [...located.problems, `No ${OPENSPEC}/changes folder in ${located.workspace.name}`],
         spendEnabled: located.config.runs !== null,
+        pullRequestsPending: false,
         checkedAt: Date.now()
       }
     }
-    const pullRequests = await lookUp(located, names, fresh)
+    const pullRequests = await lookUp(located, names, search)
     const read = await Promise.all(
       names.map((name) => readCard(io, located.root, name, located.config, pullRequests.get(name) ?? null))
     )
@@ -155,6 +172,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
       changes,
       problems: located.problems,
       spendEnabled: located.config.runs !== null,
+      pullRequestsPending: search === null && changes.some((card) => card.pullRequestsUnknown),
       checkedAt: Date.now()
     }
   }
@@ -180,7 +198,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
 
   async function listed(ref: ChangeRef): Promise<{ located: Located; card: ChangeCard } | null> {
     if (!current) {
-      await board(false)
+      await board(null)
     }
     const card = current?.changes.find((c) => c.name === ref.change)
     return current && card && current.located.workspace.id === ref.workspaceId ? { located: current.located, card } : null
@@ -195,7 +213,9 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     return files.includes(path) ? { located: found.located, path: `changes/${ref.change}/${path}` } : null
   }
 
-  orca.panels.handle('board.get', async (input) => board(input?.fresh === true))
+  orca.panels.handle('board.get', async () => board(null))
+
+  orca.panels.handle('board.pullRequests', async (input) => board({ fresh: input?.fresh === true }))
 
   orca.panels.handle('change.files', async (ref) => {
     const found = await listed(ref)

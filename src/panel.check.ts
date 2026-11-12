@@ -119,7 +119,7 @@ const DEMO_CHANGES: ChangeCard[] = [
   }
 ]
 
-const DEMO_BOARD: BoardSnapshot = { workspaceId: 'w-42', changes: DEMO_CHANGES, problems: [], spendEnabled: false, checkedAt: 0 }
+const DEMO_BOARD: BoardSnapshot = { workspaceId: 'w-42', changes: DEMO_CHANGES, problems: [], spendEnabled: false, pullRequestsPending: false, checkedAt: 0 }
 
 const DEMO_PROPOSAL = `# Offline sync
 

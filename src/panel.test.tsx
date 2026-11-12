@@ -6,6 +6,7 @@ const BOARD: BoardSnapshot = {
   workspaceId: 'w1',
   problems: [],
   spendEnabled: false,
+  pullRequestsPending: false,
   checkedAt: 0,
   changes: [
     {
@@ -92,7 +93,7 @@ const BOARD: BoardSnapshot = {
 
 const LONG_TASK = `2.5 ${'merged and deployed, checked on production; '.repeat(25)}`
 
-function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it', board: BoardSnapshot = BOARD) {
+function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it', board: BoardSnapshot = BOARD, pullRequests: () => BoardSnapshot = () => board) {
   return mockHost({
     results: {
       'agents.list': {
@@ -106,6 +107,7 @@ function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it
     },
     requests: {
       'board.get': () => board,
+      'board.pullRequests': pullRequests,
       'change.files': () => ({ files: ['proposal.md', 'tasks.md'], truncated: false }),
       'change.read': ({ path }) => ({ text: `# ${path}` }),
       'change.spend': () => ({ spend: DETAIL }),
@@ -144,6 +146,47 @@ test('the board groups changes by stage and shows the resume line, ticket and pu
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.refusals, [])
   await view.unmount()
+})
+
+test('the board draws when the pull request request fails, and says they are being checked first', async () => {
+  const pending = { ...BOARD, pullRequestsPending: true, changes: BOARD.changes.map((card) => ({ ...card, pullRequestsUnknown: true })) }
+  const host = hostWith([], 'waiting', '1.2 wire it', pending, () => {
+    throw new Error('board.pullRequests timed out after 60000ms')
+  })
+  const view = await mount(panel, { host })
+  assert.ok(view.find({ text: 'Planning' }))
+  assert.ok(view.find({ text: 'Pull requests could not be checked, so the stage ignores them; Refresh to retry.' }))
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+test('a pending board says the pull requests are being checked', async () => {
+  const pending = { ...BOARD, pullRequestsPending: true, changes: BOARD.changes.map((card) => ({ ...card, pullRequestsUnknown: true })) }
+  const host = hostWith([], 'waiting', '1.2 wire it', pending, () => pending)
+  const view = await mount(panel, { host })
+  assert.ok(view.find({ text: 'Checking pull requests…' }))
+  await view.unmount()
+})
+
+test('while a load runs a new one waits and runs once, and the fresh flag is kept', async () => {
+  const started: boolean[] = []
+  let release: () => void = () => undefined
+  const load = panel.singleFlight(async (fresh) => {
+    started.push(fresh)
+    await new Promise<void>((resolve) => {
+      release = resolve
+    })
+  })
+  const first = load()
+  void load()
+  void load(true)
+  void load()
+  assert.deepEqual(started, [false])
+  release()
+  await first
+  await Promise.resolve()
+  assert.deepEqual(started, [false, true])
+  release()
 })
 
 test('apply goes to the only agent; a planning change has no Apply', async () => {
@@ -277,6 +320,7 @@ const MODELS = [spend('claude-sonnet-5-5', 3, 7.1), spend('claude-fable-5-2', 2,
 const WITH_SPEND: BoardSnapshot = {
   ...BOARD,
   spendEnabled: true,
+  pullRequestsPending: false,
   changes: BOARD.changes.map((card, index) =>
     index === 0 ? { ...card, spend: { total: spend('total', 9, 12.4), byModel: MODELS } } : card
   )

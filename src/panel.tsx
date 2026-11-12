@@ -134,14 +134,51 @@ function refresh(): void {
   }
 }
 
-async function load(fresh = false): Promise<void> {
+export function singleFlight(task: (fresh: boolean) => Promise<void>): (fresh?: boolean) => Promise<void> {
+  let running: Promise<void> | null = null
+  let queuedFresh: boolean | null = null
+  const run = (fresh = false): Promise<void> => {
+    if (running) {
+      queuedFresh = (queuedFresh ?? false) || fresh
+      return running
+    }
+    const current = task(fresh).finally(() => {
+      running = null
+      if (queuedFresh !== null) {
+        const next = queuedFresh
+        queuedFresh = null
+        void run(next)
+      }
+    })
+    running = current
+    return current
+  }
+  return run
+}
+
+const loadPullRequests = singleFlight(async (fresh) => {
+  try {
+    set(snapshot, await plugin.request('board.pullRequests', { fresh }, REQUEST))
+  } catch {
+    const current = read(snapshot)
+    if (current?.pullRequestsPending) {
+      set(snapshot, { ...current, pullRequestsPending: false })
+    }
+  }
+})
+
+const loadBoard = singleFlight(async (fresh) => {
   try {
     set(snapshot, await plugin.request('board.get', { fresh }, REQUEST))
     set(failure, null)
   } catch (error) {
     set(failure, messageOf(error))
+    return
   }
-}
+  void loadPullRequests(fresh)
+})
+
+const load = (fresh = false): Promise<void> => loadBoard(fresh)
 
 const LEADING_STATUS_GLYPHS = /^[^\p{L}\p{N}]+/u
 const TRAILING_STATE = /:\s*(working|done|waiting|blocked|idle|needs\s+\w+)\b.*$/i
@@ -340,6 +377,9 @@ function AgentPicker() {
 }
 
 function PullRequests({ change }: { change: ChangeCard }) {
+  if (change.pullRequestsUnknown && read(snapshot)?.pullRequestsPending) {
+    return <Text muted size="xs">Checking pull requests…</Text>
+  }
   if (change.pullRequestsUnknown) {
     return <Text muted size="xs">Pull requests could not be checked, so the stage ignores them; Refresh to retry.</Text>
   }
