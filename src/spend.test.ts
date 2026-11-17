@@ -40,7 +40,7 @@ test('lines without a cost and without tokens, and malformed lines, are skipped 
 test('mixed client journals include legacy costs and sum only known estimates', () => {
   const rows = parseRuns([
     line({ model: 'claude-sonnet-5-5', costUsd: 0.75 }),
-    line({ client: 'claude', billing: 'subscription', costUsd: 99 }),
+    line({ client: 'claude', billing: 'subscription', costUsd: 0.5 }),
     line({ client: 'codex', billing: 'subscription', costUsd: null }),
     line({ client: 'codex', costUsd: 99, outputTokens: 40, reasoningTokens: 15 }),
     line({ client: 'opencode', billing: 'estimate', costUsd: 0 }),
@@ -49,19 +49,40 @@ test('mixed client journals include legacy costs and sum only known estimates', 
     line({ client: 'opencode', billing: 'other', costUsd: 99 })
   ].join('\n'))
   const detail = changeSpendDetail(rows)
-  assert.equal(detail?.total.costUsd, 1)
+  assert.equal(detail?.total.costUsd, 1.5)
   assert.equal(detail?.total.subscriptionRuns, 2)
   assert.equal(detail?.total.unknownBillingRuns, 3)
   assert.equal(detail?.total.outputTokens, 40)
   assert.equal(detail?.total.reasoningTokens, 15)
   const clientSpend = (client: { key: string; runs: number; costUsd: number | null }) => [client.key, client.runs, client.costUsd]
   assert.deepEqual(detail?.byClient.map(clientSpend), [
-    ['claude', 2, 0.75],
+    ['claude', 2, 1.25],
     ['opencode', 4, 0.25],
     ['codex', 2, null]
   ])
   assert.deepEqual(spendHistory(rows).byClient.map(clientSpend), detail?.byClient.map(clientSpend))
   assert.equal(changeSpend(parseRuns(line({ client: 'opencode', billing: 'estimate', costUsd: 0 })))?.total.costUsd, 0)
+})
+
+test('subscription rates price existing tokens using the whole input context and count reasoning once', () => {
+  const rates = new Map([['example-model', {
+    input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10,
+    longContext: { aboveInputTokens: 200_000, input: 4, cacheRead: 0.2, cacheWrite: 5, output: 15 }
+  }]])
+  const subscription = {
+    client: 'codex', billing: 'subscription', model: 'example-model',
+    inputTokens: 50_000, cacheReadTokens: 125_000, cacheWriteTokens: 25_000,
+    outputTokens: 500, reasoningTokens: 200, costUsd: null
+  }
+  const rows = parseRuns([
+    line(subscription),
+    line({ ...subscription, cacheReadTokens: 125_001 }),
+    line({ ...subscription, model: 'unknown' }),
+    line({ ...subscription, costUsd: 0 })
+  ].join('\n'), rates)
+  assert.deepEqual(rows.map((row) => row.costUsd), [0.18, 0.3575002, null, 0])
+  assert.equal(changeSpend(rows)?.total.costUsd, 0.5375)
+  assert.equal(changeSpend(rows)?.total.subscriptionRuns, 4)
 })
 
 test('only the last lines of a huge file are read', () => {

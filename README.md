@@ -162,8 +162,7 @@ cannot submit a second line.
 
 If a tool of yours records finished agent runs, the board can show a change's usage
 and estimated cost. It is off until `runs` is set in `board.json`, and a change without the file shows
-nothing. The board only reads the file and adds the numbers up; it never writes it and
-no agent is involved.
+nothing. The board reads the file and computes totals locally.
 
 ```json
 { "runs": true }
@@ -177,6 +176,10 @@ no agent is involved.
 - `folders` is optional: folders relative to the workspace root (the folder that holds
   `openspec/`), each with `*.jsonl` files of the same format, for runs that belong to no
   change. A path that is absolute or contains `..` is reported as a problem and ignored.
+- `subscriptionRates` is optional. Map each model ID to USD prices per million
+  `input`, `cacheRead`, `cacheWrite` and `output` tokens. An optional `longContext`
+  object supplies those four prices and the `aboveInputTokens` threshold at which
+  they apply. The threshold includes cached input and cache writes.
 
 What it shows:
 
@@ -188,8 +191,10 @@ What it shows:
   archived change and every configured folder, by client, model and month with a running
   estimate.
 
-Dollar totals include known estimates. Subscription runs and runs with unknown billing
-have separate counts. A dash marks a group or month with no known estimate.
+Dollar totals include known estimates. For a subscription row with no stored
+estimate, the board applies the configured model's rates to its recorded tokens.
+Subscription counts are shown alongside these estimates. A dash marks a group
+or month with no known estimate.
 
 ### The file format
 
@@ -222,8 +227,9 @@ last 20 000 lines of each file.
 ```
 
 Legacy rows with both `client` and `billing` omitted still contribute their numeric costs.
-For new rows, only `billing: "estimate"` with a numeric `costUsd` contributes to the
-dollar total. An estimate without an amount counts as unknown billing.
+For new rows, numeric `costUsd` contributes to the dollar total when billing is
+`"estimate"` or `"subscription"`. Without a numeric amount, an `"estimate"` row
+counts as unknown billing.
 
 ## Develop
 

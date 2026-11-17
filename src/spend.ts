@@ -1,4 +1,5 @@
 import { RUN_CLIENT, type ChangeSpend, type ChangeSpendDetail, type RunClient, type Spend, type SpendHistory } from './protocol'
+import type { SubscriptionRate } from './config'
 
 export const MAX_RUN_LINES = 20_000
 export const UNKNOWN_KEY = 'unknown'
@@ -7,6 +8,7 @@ export const TOTAL_KEY = 'total'
 
 const MONTH = /^\d{4}-\d{2}$/
 const COST_DECIMALS = 10_000
+const TOKENS_PER_MILLION = 1_000_000
 const BILLING = { SUBSCRIPTION: 'subscription', ESTIMATE: 'estimate' } as const
 const RUN_CLIENTS = Object.values(RUN_CLIENT)
 
@@ -38,19 +40,33 @@ const textOf = (value: unknown): string | null => (typeof value === 'string' && 
 
 const TOKEN_FIELDS = ['inputTokens', 'cacheWriteTokens', 'cacheReadTokens', 'outputTokens', 'reasoningTokens'] as const
 
-function rowOf(raw: Raw): RunRow | null {
-  const costUsd = numberOf(raw.costUsd)
-  const client = RUN_CLIENTS.find((known) => known === raw.client)
-  const billing = raw.billing === BILLING.SUBSCRIPTION || raw.billing === BILLING.ESTIMATE ? raw.billing : null
-  const legacyEstimate = raw.client === undefined && raw.billing === undefined && costUsd !== null
-  const tokens = TOKEN_FIELDS.map((field) => numberOf(raw[field]))
-  if (costUsd === null && !billing && !client && tokens.every((count) => count === null)) {
+function subscriptionCost(rate: SubscriptionRate | undefined, counts: readonly [number, number, number, number]): number | null {
+  if (!rate || counts.some((count) => count < 0) || counts.every((count) => count === 0)) {
     return null
   }
-  const [inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, reasoningTokens] = tokens.map((count) => count ?? 0)
+  const [input, cacheWrite, cacheRead, output] = counts
+  const longContext = rate.longContext
+  const tier = longContext && input + cacheWrite + cacheRead > longContext.aboveInputTokens ? longContext : rate
+  return (input * tier.input + cacheWrite * tier.cacheWrite + cacheRead * tier.cacheRead + output * tier.output) / TOKENS_PER_MILLION
+}
+
+function rowOf(raw: Raw, rates?: ReadonlyMap<string, SubscriptionRate>): RunRow | null {
+  const rawCost = numberOf(raw.costUsd)
+  const client = RUN_CLIENTS.find((known) => known === raw.client)
+  const model = textOf(raw.model)
+  const billing = raw.billing === BILLING.SUBSCRIPTION || raw.billing === BILLING.ESTIMATE ? raw.billing : null
+  const legacyEstimate = raw.client === undefined && raw.billing === undefined && rawCost !== null
+  const tokens = TOKEN_FIELDS.map((field) => numberOf(raw[field]))
+  if (rawCost === null && !billing && !client && tokens.every((count) => count === null)) {
+    return null
+  }
+  const counts = tokens.map((count) => count ?? 0)
+  const [inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, reasoningTokens] = counts
+  const subscriptionTokens = [inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens] as const
+  const costUsd = rawCost ?? (billing === BILLING.SUBSCRIPTION && model ? subscriptionCost(rates?.get(model), subscriptionTokens) : null)
   return {
     at: textOf(raw.at),
-    model: textOf(raw.model),
+    model,
     agentType: textOf(raw.agentType),
     task: textOf(raw.task),
     client: client ?? (raw.client === undefined ? RUN_CLIENT.CLAUDE : RUN_CLIENT.UNKNOWN),
@@ -67,7 +83,7 @@ function rowOf(raw: Raw): RunRow | null {
   }
 }
 
-export function parseRuns(text: string): RunRow[] {
+export function parseRuns(text: string, rates?: ReadonlyMap<string, SubscriptionRate>): RunRow[] {
   const lines = text.split('\n')
   const rows: RunRow[] = []
   for (const line of lines.length > MAX_RUN_LINES ? lines.slice(-MAX_RUN_LINES) : lines) {
@@ -80,7 +96,7 @@ export function parseRuns(text: string): RunRow[] {
     } catch {
       continue
     }
-    const row = isObject(raw) ? rowOf(raw) : null
+    const row = isObject(raw) ? rowOf(raw, rates) : null
     if (row) {
       rows.push(row)
     }
@@ -108,10 +124,11 @@ function accumulate(spend: Spend, row: RunRow): void {
   spend.runs += 1
   if (row.billing === BILLING.SUBSCRIPTION) {
     spend.subscriptionRuns += 1
-  } else if (row.billing === BILLING.ESTIMATE && row.costUsd !== null) {
-    spend.costUsd = (spend.costUsd ?? 0) + row.costUsd
-  } else {
+  } else if (row.billing !== BILLING.ESTIMATE || row.costUsd === null) {
     spend.unknownBillingRuns += 1
+  }
+  if (row.billing !== null && row.costUsd !== null) {
+    spend.costUsd = (spend.costUsd ?? 0) + row.costUsd
   }
   spend.inputTokens += row.inputTokens
   spend.cacheWriteTokens += row.cacheWriteTokens

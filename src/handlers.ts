@@ -1,7 +1,7 @@
 import type { OrcaWorkerApi } from 'orca/worker'
 import { applyText } from './apply'
 import { belongsTo, placeChange, type PlacedWorkspace } from './apply-target'
-import { CONFIG_FILE, parseConfig, type BoardConfig } from './config'
+import { CONFIG_FILE, parseConfig, type BoardConfig, type RunsRule } from './config'
 import { ARCHIVE, listChangeFiles, listChanges, readCard, taskSections, ticketOf, type Files } from './changes'
 import { pullRequestFinder, type Runner } from './pull-requests'
 import { changeSpendDetail, parseRuns, spendHistory, type RunRow } from './spend'
@@ -194,14 +194,14 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     }
   }
 
-  async function historyRows(located: Located, file: string, folders: string[]): Promise<RunRow[]> {
+  async function historyRows(located: Located, runs: RunsRule): Promise<RunRow[]> {
     const changesPath = `${located.root}/changes`
     const active = (await listChanges(io, located.root)) ?? []
     const archived = ((await io.list(`${changesPath}/${ARCHIVE}`)) ?? [])
       .filter((entry) => entry.directory && !entry.name.startsWith('.'))
       .map((entry) => `${ARCHIVE}/${entry.name}`)
-    const paths = [...active, ...archived].map((name) => `${changesPath}/${name}/${file}`)
-    for (const folder of folders) {
+    const paths = [...active, ...archived].map((name) => `${changesPath}/${name}/${runs.file}`)
+    for (const folder of runs.folders) {
       const entries = (await io.list(`${located.workspace.path}/${folder}`)) ?? []
       for (const entry of entries) {
         if (!entry.directory && entry.name.endsWith(RUNS_EXTENSION)) {
@@ -210,7 +210,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
       }
     }
     const texts = await Promise.all(paths.map((path) => io.text(path)))
-    return texts.flatMap((text) => (text === null ? [] : parseRuns(text)))
+    return texts.flatMap((text) => (text === null ? [] : parseRuns(text, runs.subscriptionRates)))
   }
 
   async function listed(ref: ChangeRef): Promise<{ located: Located; card: ChangeCard } | null> {
@@ -332,7 +332,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     const found = await listed(ref)
     const runs = found?.located.config.runs
     const text = found && runs ? await io.text(`${found.located.root}/changes/${ref.change}/${runs.file}`) : null
-    return { spend: text === null ? null : changeSpendDetail(parseRuns(text)) }
+    return { spend: text === null ? null : changeSpendDetail(parseRuns(text, runs?.subscriptionRates)) }
   })
 
   orca.panels.handle('spend.history', async () => {
@@ -342,7 +342,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
       history:
         typeof located === 'string' || !runs
           ? null
-          : spendHistory(await historyRows(located, runs.file, runs.folders))
+          : spendHistory(await historyRows(located, runs))
     }
   })
 

@@ -386,6 +386,35 @@ test('spend: history adds active changes, archived changes and the configured fo
   await worker.deactivate()
 })
 
+test('spend: configured subscription prices apply on the card, change detail and monthly journal', async () => {
+  const model = 'example-model'
+  const subscriptionRun = RUN_LINE({
+    at: '2026-01-10T10:00:00Z', model, agentType: 'main', task: '1.2',
+    client: 'codex', billing: 'subscription', costUsd: null, inputTokens: 200_000, outputTokens: 10_000
+  })
+  const { host, main } = setUp(undefined, undefined, {
+    ...SPEND_TREE,
+    [`${PATH}/openspec/board.json`]: JSON.stringify({
+      ...JSON.parse(BOARD_JSON),
+      runs: {
+        folders: ['tmp/agent-runs'],
+        subscriptionRates: { [model]: { input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10 } }
+      }
+    }),
+    [`${CHANGE}/agent-runs.jsonl`]: subscriptionRun,
+    [`${PATH}/tmp/agent-runs/loose.jsonl`]: subscriptionRun
+  })
+  const worker = await mountWorker(main, { host })
+  const board = await worker.request('board.get', undefined)
+  assert.equal(board.changes.find((card) => card.name === 'proj-7-dark-mode')?.spend?.total.costUsd, 0.5)
+  const { spend } = await worker.request('change.spend', { workspaceId: 'w1', change: 'proj-7-dark-mode' })
+  assert.equal(spend?.total.costUsd, 0.5)
+  const { history } = await worker.request('spend.history', undefined)
+  assert.equal(history?.total.costUsd, 2)
+  assert.equal(history?.total.subscriptionRuns, 2)
+  await worker.deactivate()
+})
+
 test('spend: a write in a configured journal folder invalidates the open board', async () => {
   const { host, main, watchers } = setUp(undefined, undefined, SPEND_TREE)
   const worker = await mountWorker(main, { host })

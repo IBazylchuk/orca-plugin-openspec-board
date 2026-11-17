@@ -14,7 +14,12 @@ export interface PullRequestRule {
 export interface RunsRule {
   file: string
   folders: string[]
+  subscriptionRates?: ReadonlyMap<string, SubscriptionRate>
 }
+
+const RATE_FIELDS = ['input', 'cacheRead', 'cacheWrite', 'output'] as const
+type TokenRates = Record<typeof RATE_FIELDS[number], number>
+export type SubscriptionRate = TokenRates & { longContext?: TokenRates & { aboveInputTokens: number } }
 
 export const DEFAULT_RUNS_FILE = 'agent-runs.jsonl'
 
@@ -118,6 +123,39 @@ const isSafeSegment = (value: string): boolean => SAFE_PATH_PART.test(value) && 
 
 const isSafeFolder = (value: string): boolean => value.split('/').every(isSafeSegment)
 
+function isTokenRates(raw: unknown): raw is Record<string, unknown> & TokenRates {
+  return isObject(raw) && RATE_FIELDS.every((field) => {
+    const rate = raw[field]
+    return typeof rate === 'number' && Number.isFinite(rate) && rate >= 0
+  })
+}
+
+function readSubscriptionRates(raw: unknown, problems: string[]): ReadonlyMap<string, SubscriptionRate> {
+  const rates = new Map<string, SubscriptionRate>()
+  if (!isObject(raw)) {
+    problems.push('runs.subscriptionRates must map model IDs to USD rates per million tokens')
+    return rates
+  }
+  for (const [model, value] of Object.entries(raw)) {
+    if (!MODEL_ID.test(model) || !isTokenRates(value)) {
+      problems.push(`Invalid subscription rate for "${model}"`)
+      continue
+    }
+    const longer = value.longContext
+    if (longer === undefined) {
+      rates.set(model, value)
+      continue
+    }
+    if (!isTokenRates(longer) || typeof longer.aboveInputTokens !== 'number' || !Number.isSafeInteger(longer.aboveInputTokens) ||
+        longer.aboveInputTokens <= 0) {
+      problems.push(`Invalid long-context subscription rate for "${model}"`)
+      continue
+    }
+    rates.set(model, { ...value, longContext: { ...longer, aboveInputTokens: longer.aboveInputTokens } })
+  }
+  return rates
+}
+
 function parseRunsRule(raw: unknown, problems: string[]): RunsRule | null {
   if (raw === false) {
     return null
@@ -145,7 +183,8 @@ function parseRunsRule(raw: unknown, problems: string[]): RunsRule | null {
       problems.push('runs.folders must be a list of folders inside the workspace, such as "tmp/agent-runs"')
     }
   }
-  return { file, folders }
+  const subscriptionRates = raw.subscriptionRates === undefined ? undefined : readSubscriptionRates(raw.subscriptionRates, problems)
+  return subscriptionRates?.size ? { file, folders, subscriptionRates } : { file, folders }
 }
 
 const MODEL_ID = /^[a-z0-9@][a-z0-9@._:/+\[\]-]{0,239}$/i

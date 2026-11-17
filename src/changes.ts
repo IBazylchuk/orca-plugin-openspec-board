@@ -194,7 +194,7 @@ export async function readCard(
     ticket,
     pullRequests,
     pullRequestsUnknown,
-    spend: runsText === null ? null : changeSpend(parseRuns(runsText)),
+    spend: runsText === null ? null : changeSpend(parseRuns(runsText, config.runs?.subscriptionRates)),
     inThisWorkspace: false,
     commands,
     place: commands.length > 0 ? { kind: 'here' } : { kind: 'none', reason: refused }
