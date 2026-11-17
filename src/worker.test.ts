@@ -84,7 +84,11 @@ function setUp(
       }
     }
   }
-  const main = { default: (orca: OrcaWorkerApi) => register(orca, io) }
+  let dispose: (() => void) | undefined
+  const main = {
+    default: (orca: OrcaWorkerApi) => { dispose = register(orca, io) },
+    deactivate: () => dispose?.()
+  }
   return { host, runs, main, watchers }
 }
 
@@ -382,11 +386,14 @@ test('spend: history adds active changes, archived changes and the configured fo
   await worker.deactivate()
 })
 
-test('spend: the disk watcher already covers the file, so no second watcher is added', async () => {
+test('spend: a write in a configured journal folder invalidates the open board', async () => {
   const { host, main, watchers } = setUp(undefined, undefined, SPEND_TREE)
   const worker = await mountWorker(main, { host })
   await worker.request('board.get', undefined)
   await worker.request('spend.history', undefined)
-  assert.deepEqual(watchers.map((watcher) => watcher.path), [`${PATH}/openspec/changes`])
+  assert.deepEqual(watchers.map((watcher) => watcher.path), [`${PATH}/openspec/changes`, `${PATH}/tmp/agent-runs`])
+  watchers[1].onChange()
+  assert.deepEqual(worker.posts.map((post) => post.event), ['board.changed'])
   await worker.deactivate()
+  assert.ok(watchers.every((watcher) => watcher.stopped))
 })

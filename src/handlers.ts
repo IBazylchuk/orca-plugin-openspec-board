@@ -64,14 +64,22 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
   const findPullRequests = pullRequestFinder(io.run)
   const starting = new Set<string>()
   let current: { located: Located; changes: ChangeCard[] } | null = null
-  let watched: { path: string; stop: () => void } | null = null
+  const watchers = new Map<string, () => void>()
+  const announceChange = () => orca.panels.post('board.changed', { at: Date.now() })
 
-  function watchChanges(path: string): void {
-    if (watched?.path === path) {
-      return
+  function watchBoard(paths: string[]): void {
+    const wanted = new Set(paths)
+    for (const [path, stop] of watchers) {
+      if (!wanted.has(path)) {
+        stop()
+        watchers.delete(path)
+      }
     }
-    watched?.stop()
-    watched = { path, stop: io.watch(path, () => orca.panels.post('board.changed', { at: Date.now() })) }
+    for (const path of wanted) {
+      if (!watchers.has(path)) {
+        watchers.set(path, io.watch(path, announceChange))
+      }
+    }
   }
 
   async function locate(): Promise<Located | string> {
@@ -136,6 +144,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     const located = await locate()
     if (typeof located === 'string') {
       current = null
+      watchBoard([])
       return {
         workspaceId: null,
         launchOptions: [],
@@ -149,6 +158,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     const names = await listChanges(io, located.root)
     if (names === null) {
       current = null
+      watchBoard([])
       return {
         workspaceId: located.workspace.id,
         launchOptions: [],
@@ -170,7 +180,8 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
         place: await place(located, card)
       }))
     )
-    watchChanges(`${located.root}/changes`)
+    const runFolders = located.config.runs?.folders ?? []
+    watchBoard([`${located.root}/changes`, ...runFolders.map((folder) => `${located.workspace.path}/${folder}`)])
     current = { located, changes }
     return {
       workspaceId: located.workspace.id,
@@ -368,8 +379,5 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     return { opened: true, message: `Opened ${target.workspaceName}` }
   })
 
-  return () => {
-    watched?.stop()
-    watched = null
-  }
+  return () => watchBoard([])
 }

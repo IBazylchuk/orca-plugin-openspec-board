@@ -331,22 +331,23 @@ function refreshOpened(): void {
 export function setup(ctx: PanelContext): void {
   void load()
   void loadAgents()
+  const update = () => {
+    void load().then(refreshOpened)
+    if (read(spendShown)) {
+      void loadSpendHistory()
+    }
+  }
   const recheck = setInterval(() => {
     if (read(ctx.visible)) {
-      void load().then(refreshOpened)
+      update()
     }
   }, RECHECK_MS)
   ctx.subscriptions.push(
     { dispose: () => clearInterval(recheck) },
-    plugin.on('board.changed', () => {
-      void load().then(refreshOpened)
-      if (read(spendShown)) {
-        void loadSpendHistory()
-      }
-    }),
+    plugin.on('board.changed', update),
     on('workspace.changed', () => {
       set(opened, null)
-      void load()
+      update()
       void loadAgents()
     }),
     on('agent.status.changed', ({ state }) => {
@@ -375,7 +376,7 @@ function AgentPicker() {
   const name = read(workspaceName)
   const here = name ? `"${name}"` : 'the workspace Orca shows'
   if (options.length === 0) {
-    return <Text muted size="xs">{`No agent runs in ${here}; start one to apply or finish a change here.`}</Text>
+    return <Text muted size="xs">{`Start an agent terminal in ${here} to apply or finish a change here.`}</Text>
   }
   const blocker = read(agentChoice) ? applyBlocker() : null
   return (
