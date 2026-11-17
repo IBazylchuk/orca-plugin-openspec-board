@@ -26,14 +26,26 @@ export interface Ticket {
   url: string | null
 }
 
+export const RUN_CLIENT = {
+  CLAUDE: 'claude',
+  CODEX: 'codex',
+  OPENCODE: 'opencode',
+  UNKNOWN: 'unknown'
+} as const
+
+export type RunClient = typeof RUN_CLIENT[keyof typeof RUN_CLIENT]
+
 export interface Spend {
   key: string
   runs: number
-  costUsd: number
+  costUsd: number | null
+  subscriptionRuns: number
+  unknownBillingRuns: number
   inputTokens: number
   cacheWriteTokens: number
   cacheReadTokens: number
   outputTokens: number
+  reasoningTokens: number
   durationMs: number
   checkFailures: number
   escalated: number
@@ -45,6 +57,7 @@ export interface ChangeSpend {
 }
 
 export interface ChangeSpendDetail extends ChangeSpend {
+  byClient: Spend[]
   byTask: Spend[]
   byAgent: Spend[]
 }
@@ -58,6 +71,7 @@ export interface SpendMonth {
 export interface SpendHistory {
   months: SpendMonth[]
   total: Spend
+  byClient: Spend[]
   byModel: Spend[]
 }
 

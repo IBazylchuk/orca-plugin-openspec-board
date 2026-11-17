@@ -42,7 +42,7 @@ import type {
   Stage,
   TaskSection
 } from './protocol'
-import { formatMinutes, formatMoney, formatTokens, MODELS_ON_CARD, modelLabel, spendLine } from './spend-format'
+import { billingCounts, clientLabel, formatMinutes, formatMoney, formatTokens, MODELS_ON_CARD, modelLabel, spendLine, tokenUsage } from './spend-format'
 
 const REQUEST = { timeoutMs: 60_000 }
 
@@ -756,23 +756,33 @@ function Files({ change }: { change: ChangeRef }) {
   )
 }
 
+const spendCells = (spend: Spend) => {
+  const billing = billingCounts(spend).join(' · ')
+  return { runs: spend.runs, cost: formatMoney(spend.costUsd), ...(billing ? { billing } : {}) }
+}
+
+const BILLING_COLUMN = { key: 'billing', label: 'Billing', hideBelow: 'sm' } as const
+const ESTIMATED_COST_COLUMN = { key: 'cost', label: 'Est. cost', align: 'end' } as const
+
 const spendRows = (spends: Spend[], label: (key: string) => string): TableRow[] =>
   spends.map((spend) => ({
     key: spend.key,
-    cells: { name: label(spend.key), runs: spend.runs, cost: formatMoney(spend.costUsd) }
+    cells: { name: label(spend.key), ...spendCells(spend) }
   }))
 
 const spendColumns = (nameLabel: string) =>
   [
     { key: 'name', label: nameLabel },
     { key: 'runs', label: 'Runs', align: 'end' },
-    { key: 'cost', label: 'Cost', align: 'end' }
+    ESTIMATED_COST_COLUMN,
+    BILLING_COLUMN
   ] as const
 
 const TASK_COLUMNS = [
   { key: 'task', label: 'Task' },
   { key: 'runs', label: 'Runs', align: 'end' },
-  { key: 'cost', label: 'Cost', align: 'end' },
+  ESTIMATED_COST_COLUMN,
+  BILLING_COLUMN,
   { key: 'cacheRead', label: 'Cache read', align: 'end', hideBelow: 'md' },
   { key: 'output', label: 'Output', align: 'end', hideBelow: 'md' },
   { key: 'minutes', label: 'Minutes', align: 'end', hideBelow: 'sm' },
@@ -785,8 +795,7 @@ const taskRows = (spends: Spend[]): TableRow[] =>
     key: spend.key,
     cells: {
       task: spend.key,
-      runs: spend.runs,
-      cost: formatMoney(spend.costUsd),
+      ...spendCells(spend),
       cacheRead: formatTokens(spend.cacheReadTokens),
       output: formatTokens(spend.outputTokens),
       minutes: formatMinutes(spend.durationMs),
@@ -797,8 +806,13 @@ const taskRows = (spends: Spend[]): TableRow[] =>
 
 const MODEL_COLUMNS = spendColumns('Model')
 const AGENT_COLUMNS = spendColumns('Agent')
+const CLIENT_COLUMNS = spendColumns('Client')
 
-const totalText = (total: Spend): string => `${formatMoney(total.costUsd)} in ${total.runs} runs`
+function totalText(total: Spend): string {
+  const runs = `${total.runs} ${total.runs === 1 ? 'run' : 'runs'}`
+  const summary = total.costUsd === null ? runs : `${formatMoney(total.costUsd)} estimated across ${runs}`
+  return [summary, ...billingCounts(total)].join(' · ')
+}
 
 function ChangeRuns() {
   const detail = read(spendDetail)
@@ -808,6 +822,8 @@ function ChangeRuns() {
   return (
     <Stack gap="md">
       <Text>{`Agent runs: ${totalText(detail.total)}`}</Text>
+      <Text muted size="xs">{tokenUsage(detail.total)}</Text>
+      <Table label="Agent runs by client" columns={CLIENT_COLUMNS} rows={spendRows(detail.byClient, clientLabel)} />
       <Table label="Agent runs by task" columns={TASK_COLUMNS} rows={taskRows(detail.byTask)} />
       <Table label="Agent runs by model" columns={MODEL_COLUMNS} rows={spendRows(detail.byModel, modelLabel)} />
       <Table label="Agent runs by agent type" columns={AGENT_COLUMNS} rows={spendRows(detail.byAgent, (key) => key)} />
@@ -818,21 +834,23 @@ function ChangeRuns() {
 const HISTORY_COLUMNS = [
   { key: 'month', label: 'Month' },
   { key: 'runs', label: 'Runs', align: 'end' },
-  { key: 'cost', label: 'Cost', align: 'end' },
+  ESTIMATED_COST_COLUMN,
   { key: 'cumulative', label: 'Cumulative', align: 'end' },
+  BILLING_COLUMN,
   { key: 'models', label: 'Top models', hideBelow: 'md' }
 ] as const
 
 function monthRows(history: SpendHistory): TableRow[] {
-  let running = 0
+  let running: number | null = null
   return history.months.map((month) => {
-    running += month.total.costUsd
+    if (month.total.costUsd !== null) {
+      running = (running ?? 0) + month.total.costUsd
+    }
     return {
       key: month.month,
       cells: {
         month: month.month,
-        runs: month.total.runs,
-        cost: formatMoney(month.total.costUsd),
+        ...spendCells(month.total),
         cumulative: formatMoney(running),
         models: month.byModel
           .slice(0, MODELS_ON_CARD)
@@ -854,6 +872,8 @@ function SpendHistoryBlock() {
   return (
     <Stack gap="sm">
       <Text>{`Agent spend, all changes: ${totalText(history.total)}`}</Text>
+      <Text muted size="xs">{tokenUsage(history.total)}</Text>
+      <Table label="Spend by client" columns={CLIENT_COLUMNS} rows={spendRows(history.byClient, clientLabel)} />
       <Table label="Spend by model" columns={MODEL_COLUMNS} rows={spendRows(history.byModel, modelLabel)} />
       <Table label="Spend by month" columns={HISTORY_COLUMNS} rows={monthRows(history)} />
     </Stack>

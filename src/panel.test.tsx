@@ -1,6 +1,7 @@
 import { assert, mockHost, mount, test } from 'orca/testing'
 import * as panel from './panel'
 import type { BoardSnapshot, Spend } from './protocol'
+import { parseRuns, spendHistory } from './spend'
 
 const BOARD: BoardSnapshot = {
   workspaceId: 'w1',
@@ -328,10 +329,13 @@ const spend = (key: string, runs: number, costUsd: number): Spend => ({
   key,
   runs,
   costUsd,
+  subscriptionRuns: 0,
+  unknownBillingRuns: 0,
   inputTokens: 0,
   cacheWriteTokens: 0,
   cacheReadTokens: 58367,
   outputTokens: 1_200_000,
+  reasoningTokens: 0,
   durationMs: 90_000,
   checkFailures: 1,
   escalated: 2
@@ -350,6 +354,7 @@ const WITH_SPEND: BoardSnapshot = {
 
 const DETAIL = {
   total: spend('total', 9, 12.4),
+  byClient: [spend('claude', 9, 12.4)],
   byModel: MODELS,
   byTask: [spend('1.2', 2, 1.5), spend('1.10', 3, 9.9), spend('no task', 4, 1)],
   byAgent: [spend('main', 5, 11), spend('Explore', 4, 1.4)]
@@ -357,6 +362,7 @@ const DETAIL = {
 
 const HISTORY = {
   total: spend('total', 14, 15.4),
+  byClient: [spend('claude', 14, 15.4)],
   byModel: MODELS,
   months: [
     { month: '2026-01', total: spend('2026-01', 5, 3), byModel: [spend('claude-haiku-5-5', 5, 3)] },
@@ -382,10 +388,12 @@ test('a card with runs shows one quiet line with its models', async () => {
   await view.unmount()
 })
 
-test('the opened change lists its runs by task, model and agent type', async () => {
+test('the opened change lists its runs by client, task, model and agent type', async () => {
   const view = await mount(panel, { host: hostWith([], "waiting", "1.2 wire it", WITH_SPEND) })
   await view.press(view.findAll({ text: 'Open' })[0])
   await view.select({ label: 'Change' }, 'runs')
+  const byClient = view.find({ type: 'Table', label: 'Agent runs by client' })
+  assert.equal((byClient?.props.rows as { cells: { name: string } }[])[0].cells.name, 'Claude')
   const byTask = view.find({ type: 'Table', label: 'Agent runs by task' })
   assert.deepEqual(byTask?.props.rows, [
     {
@@ -425,7 +433,7 @@ test('Spend shows the grand total, the models and the months with a running tota
   const view = await mount(panel, { host: hostWith([], "waiting", "1.2 wire it", WITH_SPEND) })
   assert.equal(view.find({ type: 'Table', label: 'Spend by month' }), null)
   await view.press({ text: 'Spend' })
-  assert.ok(view.find({ text: 'Agent spend, all changes: $15.40 in 14 runs' }))
+  assert.ok(view.find({ text: 'Agent spend, all changes: $15.40 estimated across 14 runs' }))
   const months = view.find({ type: 'Table', label: 'Spend by month' })
   assert.deepEqual(months?.props.rows, [
     { key: '2026-01', cells: { month: '2026-01', runs: 5, cost: '$3.00', cumulative: '$3.00', models: 'haiku-5-5 $3.00' } },
@@ -443,6 +451,36 @@ test('Spend shows the grand total, the models and the months with a running tota
   assert.equal((view.find({ type: 'Table', label: 'Spend by model' })?.props.rows as unknown[]).length, 3)
   await view.press({ text: 'Spend' })
   assert.equal(view.find({ type: 'Table', label: 'Spend by month' }), null)
+  assert.deepEqual(view.errors, [])
+  await view.unmount()
+})
+
+test('Spend shows subscription and unknown billing counts without adding either to estimated costs', async () => {
+  const history = spendHistory(parseRuns([
+    { at: '2026-01-01', client: 'codex', billing: 'subscription', costUsd: null, outputTokens: 40, reasoningTokens: 15 },
+    { at: '2026-01-02', client: 'opencode', costUsd: null, outputTokens: 10 },
+    { at: '2026-02-01', client: 'claude', billing: 'estimate', costUsd: 0 }
+  ].map((row) => JSON.stringify(row)).join('\n')))
+  const host = mockHost({
+    requests: {
+      'board.get': () => WITH_SPEND,
+      'spend.history': () => ({ history })
+    }
+  })
+  const view = await mount(panel, { host })
+  await view.press({ text: 'Spend' })
+  assert.ok(view.find({ text: /1 subscription.*1 unknown/i }))
+  assert.ok(view.find({ text: /Output 50 \(15 reasoning\)/ }))
+  const clients = view.find({ type: 'Table', label: 'Spend by client' })
+  const clientRows = clients?.props.rows as { cells: { name: string; cost: string } }[]
+  assert.deepEqual(clientRows.map(({ cells }) => [cells.name, cells.cost]), [
+    ['Claude', '$0.00'],
+    ['Codex', '—'],
+    ['OpenCode', '—']
+  ])
+  const months = view.find({ type: 'Table', label: 'Spend by month' })
+  const monthRows = months?.props.rows as { cells: { cost: string; cumulative: string } }[]
+  assert.deepEqual(monthRows.map(({ cells }) => [cells.cost, cells.cumulative]), [['—', '—'], ['$0.00', '$0.00']])
   assert.deepEqual(view.errors, [])
   await view.unmount()
 })

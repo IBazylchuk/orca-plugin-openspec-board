@@ -46,7 +46,7 @@ tracker to keep in sync.
   the agent.
 - **Read the change**: proposal, design and specs rendered in the panel, one click to
   open them in Orca's editor.
-- **Agent spend (optional)**: what a change cost, by task, model and agent type, and a
+- **Agent spend (optional)**: estimated costs and usage by client, task, model and agent type, and a
   history by month, summed from a JSON Lines file your own tooling writes.
 - **One config file**: `openspec/board.json` describes how your team runs OpenSpec;
   without it the board behaves like plain OpenSpec.
@@ -127,7 +127,7 @@ Archived changes are not shown.
 | `agent` | unset | Legacy option. Adds that agent to the chooser when `launchOptions` is absent |
 | `applyAnywhere` | `false` | `true` lets Apply send any change to an agent of whatever workspace is focused, instead of only from the change's own workspace |
 | `files.exclude` | none | Folders inside a change that the file list never walks, such as raw research output |
-| `runs` | off | `true`, or `{ "file": "agent-runs.jsonl", "folders": ["tmp/agent-runs"] }`; shows what each change cost, see [Agent spend](#agent-spend-optional) |
+| `runs` | off | `true`, or `{ "file": "agent-runs.jsonl", "folders": ["tmp/agent-runs"] }`; shows usage and estimated costs, see [Agent spend](#agent-spend-optional) |
 
 Problems in the file show at the top of the board. An invalid launch list pauses new launches until corrected. The `complete` key of 0.2 is no longer read and is reported until removed.
 
@@ -160,8 +160,8 @@ cannot submit a second line.
 
 ## Agent spend (optional)
 
-If a tool of yours records every finished agent run, the board can show what a change
-cost. It is off until `runs` is set in `board.json`, and a change without the file shows
+If a tool of yours records finished agent runs, the board can show a change's usage
+and estimated cost. It is off until `runs` is set in `board.json`, and a change without the file shows
 nothing. The board only reads the file and adds the numbers up; it never writes it and
 no agent is involved.
 
@@ -182,36 +182,48 @@ What it shows:
 
 - **On each card**: one line, such as `Agent runs: $12.40 · sonnet-5-5 $7.10 · haiku-5-5 $0.40`,
   with the three costliest models.
-- **In an opened change**: an "Agent runs" tab with a table by task, one by model and one
-  by agent type.
+- **In an opened change**: an "Agent runs" tab with token totals and tables by client,
+  task, model and agent type.
 - **Spend** button at the top of the board: the total over every active change, every
-  archived change and every configured folder, by model and by month with a running total.
+  archived change and every configured folder, by client, model and month with a running
+  estimate.
+
+Dollar totals include known estimates. Subscription runs and runs with unknown billing
+have separate counts. A dash marks a group or month with no known estimate.
 
 ### The file format
 
 `openspec/changes/<change>/agent-runs.jsonl`, one JSON object per line. Any tool may
-write it. Every field is optional, but a line with neither a numeric `costUsd` nor a
-token count is skipped, and so is a line that is not valid JSON. Only the last 20 000
-lines of a file are read.
+write it. Every field is optional. A line needs a recognized client or billing value,
+a numeric `costUsd` or a token count. The board skips invalid JSON and reads only the
+last 20 000 lines of each file.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `at` | ISO time | When the run finished; groups the run by month, `unknown` when missing |
+| `client` | string | `claude`, `codex` or `opencode`. Missing means Claude for legacy files. |
 | `model` | string | Model id, such as `claude-sonnet-5-5` |
 | `agentType` | string | Kind of agent; `main` is the main session |
 | `task` | string | Task number such as `2.3`; runs without one are listed as `no task` |
-| `costUsd` | number | Cost of the run in US dollars |
+| `billing` | string | `subscription` or `estimate`. Other values mean unknown billing. |
+| `costUsd` | number or null | Estimated US dollars. Use `null` when there is no per-run estimate. A numeric zero is a known estimate. |
 | `inputTokens` | number | Input tokens |
 | `cacheWriteTokens` | number | Tokens written to the cache |
 | `cacheReadTokens` | number | Tokens read from the cache |
 | `outputTokens` | number | Output tokens |
+| `reasoningTokens` | number | Reasoning tokens already included in `outputTokens` |
 | `durationMs` | number | Run time in milliseconds |
 | `checkFailures` | number | Checks that failed during the run |
 | `isEscalated` | boolean | The run was handed to a stronger model |
 
 ```json
-{"at":"2026-01-10T18:56:50.228Z","agentType":"Explore","task":"1.2","model":"claude-haiku-5-5","inputTokens":6,"cacheWriteTokens":33062,"cacheReadTokens":58367,"outputTokens":712,"costUsd":0.0051,"durationMs":11514,"checkFailures":0,"isEscalated":false}
+{"at":"2026-01-10T18:56:50.228Z","client":"claude","billing":"estimate","agentType":"Explore","task":"1.2","model":"claude-haiku-5-5","inputTokens":6,"cacheWriteTokens":33062,"cacheReadTokens":58367,"outputTokens":712,"costUsd":0.0051,"durationMs":11514,"checkFailures":0,"isEscalated":false}
+{"at":"2026-01-10T19:10:27.128Z","client":"codex","billing":"subscription","agentType":"main","task":"1.2","model":"gpt-x","inputTokens":214,"cacheReadTokens":202,"outputTokens":83,"reasoningTokens":25,"costUsd":null}
 ```
+
+Legacy rows with both `client` and `billing` omitted still contribute their numeric costs.
+For new rows, only `billing: "estimate"` with a numeric `costUsd` contributes to the
+dollar total. An estimate without an amount counts as unknown billing.
 
 ## Develop
 

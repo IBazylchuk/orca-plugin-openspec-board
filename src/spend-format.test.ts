@@ -6,10 +6,13 @@ const spend = (key: string, costUsd: number): Spend => ({
   key,
   runs: 1,
   costUsd,
+  subscriptionRuns: 0,
+  unknownBillingRuns: 0,
   inputTokens: 0,
   cacheWriteTokens: 0,
   cacheReadTokens: 0,
   outputTokens: 0,
+  reasoningTokens: 0,
   durationMs: 0,
   checkFailures: 0,
   escalated: 0
@@ -26,6 +29,11 @@ test('money shows two decimals, and a cent only from half a cent', () => {
   assert.equal(formatMoney(0.005), '$0.01')
   assert.equal(formatMoney(0.0049), '<$0.01')
   assert.equal(formatMoney(0), '$0.00')
+})
+
+test('unknown costs display a placeholder', () => {
+  assert.equal(formatMoney(null), '—')
+  assert.equal(formatMoney(undefined), '—')
 })
 
 test('token counts are compact', () => {

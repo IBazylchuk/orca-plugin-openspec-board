@@ -34,7 +34,34 @@ test('lines without a cost and without tokens, and malformed lines, are skipped 
     line({ costUsd: 1 }),
     line({ outputTokens: 5 })
   ].join('\n')
-  assert.deepEqual(parseRuns(text).map((row) => [row.costUsd, row.outputTokens]), [[1, 0], [0, 5]])
+  assert.deepEqual(parseRuns(text).map((row) => [row.costUsd, row.outputTokens]), [[1, 0], [null, 5]])
+})
+
+test('mixed client journals include legacy costs and sum only known estimates', () => {
+  const rows = parseRuns([
+    line({ model: 'claude-sonnet-5-5', costUsd: 0.75 }),
+    line({ client: 'claude', billing: 'subscription', costUsd: 99 }),
+    line({ client: 'codex', billing: 'subscription', costUsd: null }),
+    line({ client: 'codex', costUsd: 99, outputTokens: 40, reasoningTokens: 15 }),
+    line({ client: 'opencode', billing: 'estimate', costUsd: 0 }),
+    line({ client: 'opencode', billing: 'estimate', costUsd: 0.25 }),
+    line({ client: 'opencode', billing: 'estimate', costUsd: null }),
+    line({ client: 'opencode', billing: 'other', costUsd: 99 })
+  ].join('\n'))
+  const detail = changeSpendDetail(rows)
+  assert.equal(detail?.total.costUsd, 1)
+  assert.equal(detail?.total.subscriptionRuns, 2)
+  assert.equal(detail?.total.unknownBillingRuns, 3)
+  assert.equal(detail?.total.outputTokens, 40)
+  assert.equal(detail?.total.reasoningTokens, 15)
+  const clientSpend = (client: { key: string; runs: number; costUsd: number | null }) => [client.key, client.runs, client.costUsd]
+  assert.deepEqual(detail?.byClient.map(clientSpend), [
+    ['claude', 2, 0.75],
+    ['opencode', 4, 0.25],
+    ['codex', 2, null]
+  ])
+  assert.deepEqual(spendHistory(rows).byClient.map(clientSpend), detail?.byClient.map(clientSpend))
+  assert.equal(changeSpend(parseRuns(line({ client: 'opencode', billing: 'estimate', costUsd: 0 })))?.total.costUsd, 0)
 })
 
 test('only the last lines of a huge file are read', () => {

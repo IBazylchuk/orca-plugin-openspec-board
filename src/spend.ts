@@ -1,4 +1,4 @@
-import type { ChangeSpend, ChangeSpendDetail, Spend, SpendHistory } from './protocol'
+import { RUN_CLIENT, type ChangeSpend, type ChangeSpendDetail, type RunClient, type Spend, type SpendHistory } from './protocol'
 
 export const MAX_RUN_LINES = 20_000
 export const UNKNOWN_KEY = 'unknown'
@@ -7,17 +7,22 @@ export const TOTAL_KEY = 'total'
 
 const MONTH = /^\d{4}-\d{2}$/
 const COST_DECIMALS = 10_000
+const BILLING = { SUBSCRIPTION: 'subscription', ESTIMATE: 'estimate' } as const
+const RUN_CLIENTS = Object.values(RUN_CLIENT)
 
 export interface RunRow {
   at: string | null
   model: string | null
   agentType: string | null
   task: string | null
-  costUsd: number
+  client: RunClient
+  billing: typeof BILLING[keyof typeof BILLING] | null
+  costUsd: number | null
   inputTokens: number
   cacheWriteTokens: number
   cacheReadTokens: number
   outputTokens: number
+  reasoningTokens: number
   durationMs: number
   checkFailures: number
   isEscalated: boolean
@@ -31,25 +36,31 @@ const numberOf = (value: unknown): number | null => (typeof value === 'number' &
 
 const textOf = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null)
 
-const TOKEN_FIELDS = ['inputTokens', 'cacheWriteTokens', 'cacheReadTokens', 'outputTokens'] as const
+const TOKEN_FIELDS = ['inputTokens', 'cacheWriteTokens', 'cacheReadTokens', 'outputTokens', 'reasoningTokens'] as const
 
 function rowOf(raw: Raw): RunRow | null {
   const costUsd = numberOf(raw.costUsd)
+  const client = RUN_CLIENTS.find((known) => known === raw.client)
+  const billing = raw.billing === BILLING.SUBSCRIPTION || raw.billing === BILLING.ESTIMATE ? raw.billing : null
+  const legacyEstimate = raw.client === undefined && raw.billing === undefined && costUsd !== null
   const tokens = TOKEN_FIELDS.map((field) => numberOf(raw[field]))
-  if (costUsd === null && tokens.every((count) => count === null)) {
+  if (costUsd === null && !billing && !client && tokens.every((count) => count === null)) {
     return null
   }
-  const [inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens] = tokens.map((count) => count ?? 0)
+  const [inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, reasoningTokens] = tokens.map((count) => count ?? 0)
   return {
     at: textOf(raw.at),
     model: textOf(raw.model),
     agentType: textOf(raw.agentType),
     task: textOf(raw.task),
-    costUsd: costUsd ?? 0,
+    client: client ?? (raw.client === undefined ? RUN_CLIENT.CLAUDE : RUN_CLIENT.UNKNOWN),
+    billing: legacyEstimate ? BILLING.ESTIMATE : billing,
+    costUsd,
     inputTokens,
     cacheWriteTokens,
     cacheReadTokens,
     outputTokens,
+    reasoningTokens,
     durationMs: numberOf(raw.durationMs) ?? 0,
     checkFailures: numberOf(raw.checkFailures) ?? 0,
     isEscalated: raw.isEscalated === true
@@ -80,11 +91,14 @@ export function parseRuns(text: string): RunRow[] {
 const emptySpend = (key: string): Spend => ({
   key,
   runs: 0,
-  costUsd: 0,
+  costUsd: null,
+  subscriptionRuns: 0,
+  unknownBillingRuns: 0,
   inputTokens: 0,
   cacheWriteTokens: 0,
   cacheReadTokens: 0,
   outputTokens: 0,
+  reasoningTokens: 0,
   durationMs: 0,
   checkFailures: 0,
   escalated: 0
@@ -92,17 +106,30 @@ const emptySpend = (key: string): Spend => ({
 
 function accumulate(spend: Spend, row: RunRow): void {
   spend.runs += 1
-  spend.costUsd += row.costUsd
+  if (row.billing === BILLING.SUBSCRIPTION) {
+    spend.subscriptionRuns += 1
+  } else if (row.billing === BILLING.ESTIMATE && row.costUsd !== null) {
+    spend.costUsd = (spend.costUsd ?? 0) + row.costUsd
+  } else {
+    spend.unknownBillingRuns += 1
+  }
   spend.inputTokens += row.inputTokens
   spend.cacheWriteTokens += row.cacheWriteTokens
   spend.cacheReadTokens += row.cacheReadTokens
   spend.outputTokens += row.outputTokens
+  spend.reasoningTokens += row.reasoningTokens
   spend.durationMs += row.durationMs
   spend.checkFailures += row.checkFailures
   spend.escalated += row.isEscalated ? 1 : 0
 }
 
-const rounded = (spend: Spend): Spend => ({ ...spend, costUsd: Math.round(spend.costUsd * COST_DECIMALS) / COST_DECIMALS })
+function rounded(spend: Spend): Spend {
+  if (spend.costUsd !== null) {
+    const roundedCost = Math.round(spend.costUsd * COST_DECIMALS) / COST_DECIMALS
+    spend.costUsd = roundedCost || spend.costUsd
+  }
+  return spend
+}
 
 export function totalOf(rows: RunRow[]): Spend {
   const total = emptySpend(TOTAL_KEY)
@@ -123,7 +150,10 @@ function groupBy(rows: RunRow[], keyOf: (row: RunRow) => string): Spend[] {
   return [...groups.values()].map(rounded)
 }
 
-const byCostDescending = (a: Spend, b: Spend): number => b.costUsd - a.costUsd || a.key.localeCompare(b.key)
+const byCostDescending = (a: Spend, b: Spend): number =>
+  (b.costUsd ?? -Infinity) - (a.costUsd ?? -Infinity) || a.key.localeCompare(b.key)
+
+const clientOf = (row: RunRow): RunClient => row.client
 
 const modelOf = (row: RunRow): string => row.model ?? UNKNOWN_KEY
 
@@ -160,6 +190,7 @@ export function changeSpendDetail(rows: RunRow[]): ChangeSpendDetail | null {
   return summary
     ? {
         ...summary,
+        byClient: groupBy(rows, clientOf).sort(byCostDescending),
         byTask: groupBy(rows, taskOf).sort((a, b) => taskOrder(a.key, b.key)),
         byAgent: groupBy(rows, agentOf).sort(byCostDescending)
       }
@@ -181,5 +212,10 @@ export function spendHistory(rows: RunRow[]): SpendHistory {
       total: totalOf(monthRows),
       byModel: groupBy(monthRows, modelOf).sort(byCostDescending)
     }))
-  return { months, total: totalOf(rows), byModel: groupBy(rows, modelOf).sort(byCostDescending) }
+  return {
+    months,
+    total: totalOf(rows),
+    byClient: groupBy(rows, clientOf).sort(byCostDescending),
+    byModel: groupBy(rows, modelOf).sort(byCostDescending)
+  }
 }
