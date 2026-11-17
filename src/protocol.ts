@@ -92,7 +92,13 @@ export interface TaskSection {
   tasks: TaskItem[]
 }
 
+export interface LaunchChoice {
+  id: string
+  label: string
+}
+
 export interface BoardSnapshot {
+  launchOptions: LaunchChoice[]
   workspaceId: string | null
   changes: ChangeCard[]
   problems: string[]
@@ -118,7 +124,7 @@ declare module 'orca' {
       output: { sent: boolean; message: string }
     }
     'change.start': {
-      input: ChangeRef & { command: CommandName }
+      input: ChangeRef & { command: CommandName; launchId: string }
       output: { started: boolean; message: string }
     }
     'change.spend': { input: ChangeRef; output: { spend: ChangeSpendDetail | null } }

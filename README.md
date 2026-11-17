@@ -105,7 +105,11 @@ Archived changes are not shown.
   "pullRequests": { "owner": "example-org", "search": "{ticket} in:title" },
   "apply": "/work {ticket}",
   "finish": "/close {ticket}",
-  "agent": "claude",
+  "launchOptions": [
+    { "id": "claude", "label": "Claude", "agent": "claude" },
+    { "id": "codex", "label": "Codex", "agent": "codex" },
+    { "id": "opencode", "label": "OpenCode", "agent": "opencode" }
+  ],
   "files": { "exclude": ["research"] }
 }
 ```
@@ -119,13 +123,13 @@ Archived changes are not shown.
 | `apply` | `/opsx:apply {change}` | What Apply sends; `{change}` and `{ticket}` are replaced |
 | `finish` | a check, then `/opsx:archive {change}` | What Finish sends. The default asks the agent to compare `tasks.md` with the code, the Git history and the pull requests, tick what is really done, run `/opsx:archive` when nothing is left, and otherwise list what is left and stop. Set your own to add your release steps, such as moving the ticket to Done |
 | `task` | `/opsx:apply {change} only task {task}` | What a task's run button sends; `{task}` is the task's text as written in `tasks.md` |
-| `agent` | `claude` | The agent a "… in new" button starts in the new workspace |
+| `launchOptions` | Claude, Codex, OpenCode | Options shown before a new workspace launches. Each has a unique `id`, a `label`, the Orca `agent` ID, and an optional `model` ID. Without a model ID, Orca uses the selected agent's settings |
+| `agent` | unset | Legacy option. Adds that agent to the chooser when `launchOptions` is absent |
 | `applyAnywhere` | `false` | `true` lets Apply send any change to an agent of whatever workspace is focused, instead of only from the change's own workspace |
 | `files.exclude` | none | Folders inside a change that the file list never walks, such as raw research output |
 | `runs` | off | `true`, or `{ "file": "agent-runs.jsonl", "folders": ["tmp/agent-runs"] }`; shows what each change cost, see [Agent spend](#agent-spend-optional) |
 
-Problems in the file show at the top of the board, and the default is used for the
-broken key. The `complete` key of 0.2 is no longer read and is reported until removed.
+Problems in the file show at the top of the board. An invalid launch list pauses new launches until corrected. The `complete` key of 0.2 is no longer read and is reported until removed.
 
 ## Apply and Finish
 
@@ -146,7 +150,7 @@ workspace work on one change, so the board never sends another change to them.
 |---|---|
 | The change's own workspace | Apply or Finish, sent to the agent you pick |
 | Another workspace, and the change has its own | Go to that workspace |
-| A folder workspace, and the change has none | Apply or Finish in a new workspace named after the change: `orca worktree create` makes a sibling folder workspace and starts `agent` there with the command |
+| A folder workspace, and the change has none | Apply or Finish opens a chooser. Select an agent and press Start agent to create a sibling folder workspace and send the command |
 | A Git worktree, and the change has none | A note to create a workspace named after it (a new Git worktree is left to your own setup) |
 
 Apply and Finish type the command and press Enter. They wait while the chosen agent is

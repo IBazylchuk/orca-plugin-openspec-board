@@ -31,10 +31,12 @@ const RUNS_EXTENSION = '.jsonl'
 const isLocal = (workspace: Workspace): boolean => workspace.hostId === null || workspace.hostId === 'local'
 
 const ORCA_CLI = 'orca'
+const EXISTING_WORKSPACE_MODEL_AGENTS = new Set(['opencode', 'opencode2'])
 
 interface CliReply {
   ok?: boolean
   error?: { message?: string }
+  result?: { worktree?: { id?: string } }
 }
 
 function cliReply(output: string | null): CliReply | null {
@@ -60,6 +62,7 @@ function pickFocused(workspaces: Workspace[], branch: string, displayName: strin
 
 export function register(orca: OrcaWorkerApi, io: Io): () => void {
   const findPullRequests = pullRequestFinder(io.run)
+  const starting = new Set<string>()
   let current: { located: Located; changes: ChangeCard[] } | null = null
   let watched: { path: string; stop: () => void } | null = null
 
@@ -135,6 +138,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
       current = null
       return {
         workspaceId: null,
+        launchOptions: [],
         changes: [],
         problems: [located],
         spendEnabled: false,
@@ -147,6 +151,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
       current = null
       return {
         workspaceId: located.workspace.id,
+        launchOptions: [],
         changes: [],
         problems: [...located.problems, `No ${OPENSPEC}/changes folder in ${located.workspace.name}`],
         spendEnabled: located.config.runs !== null,
@@ -169,6 +174,7 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     current = { located, changes }
     return {
       workspaceId: located.workspace.id,
+      launchOptions: located.config.launchOptions.map(({ id, label }) => ({ id, label })),
       changes,
       problems: located.problems,
       spendEnabled: located.config.runs !== null,
@@ -260,38 +266,49 @@ export function register(orca: OrcaWorkerApi, io: Io): () => void {
     return { sent: accepted, message: accepted ? `Sent ${chosen.text}` : 'Orca did not accept the text' }
   })
 
-  orca.panels.handle('change.start', async ({ workspaceId, change, command }) => {
+  orca.panels.handle('change.start', async ({ workspaceId, change, command, launchId }) => {
     const found = await listed({ workspaceId, change })
     const target = found?.card.place
     const chosen = found ? commandOf(found.card, command) : undefined
     if (!found || target?.kind !== 'new' || !chosen) {
       return { started: false, message: 'That change cannot start a workspace from here' }
     }
-    const { workspaces } = await orca.host.call('workspace.list')
-    if (workspaces.some((workspace) => workspace.name === target.workspaceName)) {
-      return { started: false, message: `A workspace named ${target.workspaceName} already exists; refresh the board` }
+    const option = found.located.config.launchOptions.find(({ id }) => id === launchId)
+    if (!option) {
+      return { started: false, message: 'Choose an agent listed on the board' }
     }
-    const reply = cliReply(
-      await io.run(ORCA_CLI, [
-        'worktree',
-        'create',
-        '--repo',
-        `path:${found.located.workspace.path}`,
-        '--name',
-        target.workspaceName,
-        '--no-parent',
-        '--agent',
-        found.located.config.agent,
-        '--prompt',
-        chosen.text,
-        '--activate',
-        '--json'
-      ])
-    )
-    if (!reply?.ok) {
-      return { started: false, message: reply?.error?.message ?? 'Orca did not create the workspace' }
+    const name = target.workspaceName
+    if (starting.has(name)) return { started: false, message: `A launch for ${name} is already in progress` }
+    starting.add(name)
+    try {
+      const { workspaces } = await orca.host.call('workspace.list')
+      if (workspaces.some((workspace) => workspace.name === name)) {
+        return { started: false, message: `A workspace named ${name} already exists; refresh the board` }
+      }
+      const preferences = ['--agent', option.agent, ...(option.model ? ['--model', option.model] : []),
+        '--prompt', chosen.text]
+      const needsExistingWorkspace = option.model && EXISTING_WORKSPACE_MODEL_AGENTS.has(option.agent)
+      const created = cliReply(await io.run(ORCA_CLI, [
+        'worktree', 'create', '--repo', `path:${found.located.workspace.path}`, '--name', name, '--no-parent',
+        ...(needsExistingWorkspace ? [] : preferences), '--activate', '--json'
+      ]))
+      if (!created?.ok) {
+        return { started: false, message: created?.error?.message ?? 'Orca did not create the workspace' }
+      }
+      if (needsExistingWorkspace) {
+        const id = created.result?.worktree?.id
+        if (!id) return { started: false, message: `Created ${name}, but Orca did not return its workspace ID` }
+        const launched = cliReply(await io.run(ORCA_CLI, [
+          'agent', 'launch', '--worktree', `id:${id}`, ...preferences, '--focus', '--json'
+        ]))
+        if (!launched?.ok) {
+          return { started: false, message: `Created ${name}. ${launched?.error?.message ?? 'Orca did not start the agent'}` }
+        }
+      }
+      return { started: true, message: `Created ${name}; ${option.label} got ${chosen.text}` }
+    } finally {
+      starting.delete(name)
     }
-    return { started: true, message: `Created ${target.workspaceName}; ${found.located.config.agent} got ${chosen.text}` }
   })
 
   orca.panels.handle('change.tasks', async (ref) => {

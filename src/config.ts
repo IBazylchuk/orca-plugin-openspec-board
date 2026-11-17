@@ -1,3 +1,5 @@
+import type { LaunchChoice } from './protocol'
+
 export interface TicketRule {
   pattern: RegExp
   key: string
@@ -16,6 +18,11 @@ export interface RunsRule {
 
 export const DEFAULT_RUNS_FILE = 'agent-runs.jsonl'
 
+export interface LaunchOption extends LaunchChoice {
+  agent: string
+  model?: string
+}
+
 export interface BoardConfig {
   runs: RunsRule | null
   requiredArtifacts: string[]
@@ -25,7 +32,7 @@ export interface BoardConfig {
   apply: string
   finish: string
   task: string
-  agent: string
+  launchOptions: LaunchOption[]
   applyAnywhere: boolean
   exclude: string[]
 }
@@ -42,7 +49,11 @@ export const DEFAULT_CONFIG: BoardConfig = {
   finish:
     'Check whether the OpenSpec change {change} is finished: compare openspec/changes/{change}/tasks.md with the code, the git history and its pull requests, and tick each task that is really done. If every task is done, run /opsx:archive {change}. Otherwise list what is left and stop without starting it.',
   task: '/opsx:apply {change} only task {task}',
-  agent: 'claude',
+  launchOptions: [
+    { id: 'claude', label: 'Claude', agent: 'claude' },
+    { id: 'codex', label: 'Codex', agent: 'codex' },
+    { id: 'opencode', label: 'OpenCode', agent: 'opencode' }
+  ],
   applyAnywhere: false,
   exclude: []
 }
@@ -137,6 +148,24 @@ function parseRunsRule(raw: unknown, problems: string[]): RunsRule | null {
   return { file, folders }
 }
 
+const MODEL_ID = /^[a-z0-9@][a-z0-9@._:/+\[\]-]{0,239}$/i
+
+function launchOptions(raw: unknown): LaunchOption[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  const choices: LaunchOption[] = []
+  const ids = new Set<string>()
+  for (const entry of raw) {
+    if (!isObject(entry) || typeof entry.id !== 'string' || !AGENT.test(entry.id)
+      || ids.has(entry.id) || typeof entry.label !== 'string' || !entry.label.trim()
+      || typeof entry.agent !== 'string' || !AGENT.test(entry.agent)) return null
+    const model = entry.model
+    if (model !== undefined && (typeof model !== 'string' || !MODEL_ID.test(model))) return null
+    ids.add(entry.id)
+    choices.push({ id: entry.id, label: entry.label.trim(), agent: entry.agent, ...(model ? { model } : {}) })
+  }
+  return choices
+}
+
 export function parseConfig(text: string | null): { config: BoardConfig; problems: string[] } {
   if (text === null) {
     return { config: DEFAULT_CONFIG, problems: [] }
@@ -193,11 +222,15 @@ export function parseConfig(text: string | null): { config: BoardConfig; problem
       problems.push('task must be a command containing {task}, such as "/opsx:apply {change} only task {task}"')
     }
   }
-  if (raw.agent !== undefined) {
-    if (typeof raw.agent === 'string' && AGENT.test(raw.agent)) {
-      config.agent = raw.agent
-    } else {
+  if (raw.launchOptions !== undefined) {
+    const options = launchOptions(raw.launchOptions)
+    config.launchOptions = options ?? []
+    if (!options) problems.push('launchOptions must list unique IDs, labels and agent IDs, with optional model IDs')
+  } else if (raw.agent !== undefined) {
+    if (typeof raw.agent !== 'string' || !AGENT.test(raw.agent)) {
       problems.push('agent must be the name of an agent Orca starts, such as "claude" or "codex"')
+    } else if (!config.launchOptions.some((option) => option.agent === raw.agent)) {
+      config.launchOptions = [{ id: raw.agent, label: raw.agent, agent: raw.agent }, ...config.launchOptions]
     }
   }
   if (raw.applyAnywhere !== undefined) {

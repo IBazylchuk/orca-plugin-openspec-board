@@ -12,7 +12,11 @@ const BOARD_JSON = JSON.stringify({
   ticket: { pattern: '^proj-(\\d+)', key: 'PROJ-$1' },
   pullRequests: { owner: 'example-org' },
   apply: '/work {ticket}',
-  finish: '/close {ticket}'
+  finish: '/close {ticket}',
+  launchOptions: [
+    { id: 'codex', label: 'Codex', agent: 'codex', model: 'example-model' },
+    { id: 'opencode', label: 'OpenCode', agent: 'opencode', model: 'example/provider-model' },
+  ]
 })
 
 const TREE = {
@@ -70,7 +74,7 @@ function setUp(
     ...fakeFiles(tree),
     run: async (command: string, args: string[]) => {
       runs.push([command, ...args])
-      return command === 'orca' ? JSON.stringify({ ok: true }) : searchOutput
+      return command === 'orca' ? JSON.stringify({ ok: true, result: { worktree: { id: 'created-workspace' } } }) : searchOutput
     },
     watch: (path: string, onChange: () => void) => {
       const watcher = { path, onChange, stopped: false }
@@ -198,11 +202,12 @@ test('a change without its own workspace starts one with an agent that gets the 
   const worker = await mountWorker(main, { host })
   await worker.request('board.pullRequests', undefined)
   const ref = { workspaceId: 'w1', change: 'proj-10-done' }
-  assert.equal((await worker.request('change.start', { ...ref, command: 'apply' })).started, false)
-  assert.equal((await worker.request('change.start', { workspaceId: 'w1', change: 'proj-9-api', command: 'apply' })).started, false)
-  assert.deepEqual(await worker.request('change.start', { ...ref, command: 'finish' }), {
+  assert.equal((await worker.request('change.start', { ...ref, command: 'apply', launchId: 'codex' })).started, false)
+  assert.equal((await worker.request('change.start', { workspaceId: 'w1', change: 'proj-9-api', command: 'apply', launchId: 'codex' })).started, false)
+  assert.equal((await worker.request('change.start', { ...ref, command: 'finish', launchId: 'unlisted' })).started, false)
+  assert.deepEqual(await worker.request('change.start', { ...ref, command: 'finish', launchId: 'codex' }), {
     started: true,
-    message: 'Created PROJ-10; claude got /close PROJ-10'
+    message: 'Created PROJ-10; Codex got /close PROJ-10'
   })
   assert.deepEqual(runs.filter((run) => run[0] === 'orca'), [
     [
@@ -215,7 +220,9 @@ test('a change without its own workspace starts one with an agent that gets the 
       'PROJ-10',
       '--no-parent',
       '--agent',
-      'claude',
+      'codex',
+      '--model',
+      'example-model',
       '--prompt',
       '/close PROJ-10',
       '--activate',
@@ -223,6 +230,20 @@ test('a change without its own workspace starts one with an agent that gets the 
     ]
   ])
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('OpenCode uses the exact created workspace for its selected model', async () => {
+  const { host, runs, main } = setUp()
+  const worker = await mountWorker(main, { host })
+  await worker.request('board.pullRequests', undefined)
+  const request = { workspaceId: 'w1', change: 'proj-10-done', command: 'finish' as const, launchId: 'opencode' }
+  assert.equal((await worker.request('change.start', request)).started, true)
+  assert.deepEqual(runs.filter((run) => run[0] === 'orca'), [
+    ['orca', 'worktree', 'create', '--repo', `path:${PATH}`, '--name', 'PROJ-10', '--no-parent', '--activate', '--json'],
+    ['orca', 'agent', 'launch', '--worktree', 'id:created-workspace', '--agent', 'opencode',
+      '--model', 'example/provider-model', '--prompt', '/close PROJ-10', '--focus', '--json']
+  ])
   await worker.deactivate()
 })
 

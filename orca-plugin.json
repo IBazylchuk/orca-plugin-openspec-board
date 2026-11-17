@@ -3,7 +3,7 @@
   "id": "openspec-board",
   "name": "OpenSpec Board",
   "version": "0.6.1",
-  "description": "Kanban board for OpenSpec spec-driven development: every change by stage with task progress, next step, ticket and GitHub pull requests. Apply and Finish send /opsx:apply, a finish check or your own command to the Claude Code or Codex agent of the change's own workspace, or start that workspace.",
+  "description": "Kanban board for OpenSpec spec-driven development: every change by stage with task progress, next step, ticket and GitHub pull requests. Apply and Finish send /opsx:apply, a finish check or your own command to an existing agent or let you choose an agent for a new workspace.",
   "license": "MIT",
   "cover": {
     "path": "docs/cover.png",

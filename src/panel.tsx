@@ -83,6 +83,9 @@ const failure = atom<string | null>(null)
 const notice = atom<string | null>(null)
 const agents = atom<AgentOption[]>([])
 const workspaceName = atom<string | null>(null)
+const pendingLaunch = atom<(ChangeRef & { command: CommandName }) | null>(null)
+const launchChoice = atom('')
+const launching = atom(false)
 const agentChoice = atom('agent', '', { persist: 'workspace' })
 const stageFilter = atom('stage', ALL_STAGES, { persist: 'workspace' })
 const opened = atom<ChangeRef | null>(null)
@@ -286,12 +289,25 @@ async function run(ref: ChangeRef, command: CommandName): Promise<void> {
   }
 }
 
-async function start(ref: ChangeRef, command: CommandName): Promise<void> {
+function chooseLaunch(ref: ChangeRef, command: CommandName): void {
+  set(launchChoice, '')
+  set(pendingLaunch, { ...ref, command })
+}
+
+async function start(): Promise<void> {
+  const request = read(pendingLaunch)
+  const launchId = read(launchChoice)
+  if (!request || !launchId || read(launching)) return
+  set(launching, true)
   try {
-    set(notice, (await plugin.request('change.start', { ...ref, command }, REQUEST)).message)
+    const result = await plugin.request('change.start', { ...request, launchId }, REQUEST)
+    set(notice, result.message)
+    if (result.started) set(pendingLaunch, null)
     await load()
   } catch (error) {
     set(notice, messageOf(error))
+  } finally {
+    set(launching, false)
   }
 }
 
@@ -453,11 +469,37 @@ function StartButton({ reference, command, workspace }: { reference: ChangeRef; 
       size="sm"
       icon={COMMAND_ICON[command.name]}
       variant="outline"
-      tooltip={`Creates the workspace ${workspace} and starts an agent there with ${command.text}`}
-      onPress={() => start(reference, command.name)}
+      tooltip={`Choose an agent for ${workspace}`}
+      disabled={read(launching)}
+      onPress={() => chooseLaunch(reference, command.name)}
     >
       {`${COMMAND_LABEL[command.name]} in new ${workspace}`}
     </Button>
+  )
+}
+
+function LaunchPicker({ workspace }: { workspace: string }) {
+  const options = read(snapshot)?.launchOptions ?? []
+  const selected = read(launchChoice)
+  const busy = read(launching)
+  return (
+    <Stack gap="xs">
+      {options.length > 0 ? (
+        <Select
+          label={`Agent for ${workspace}`}
+          placeholder="Choose an agent"
+          value={selected}
+          options={options.map(({ id, label }) => ({ value: id, label }))}
+          onChange={(value) => set(launchChoice, value)}
+        />
+      ) : <Text muted size="xs">Check the board configuration to enable agent launches.</Text>}
+      <Row gap="xs" wrap>
+        <Button size="sm" variant="solid" disabled={busy || !options.some(({ id }) => id === selected)} onPress={start}>
+          {busy ? 'Starting…' : 'Start agent'}
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onPress={() => set(pendingLaunch, null)}>Cancel</Button>
+      </Row>
+    </Stack>
   )
 }
 
@@ -474,7 +516,12 @@ function Actions({ reference, change }: { reference: ChangeRef; change: ChangeCa
       )
     case 'elsewhere':
       return <GoToWorkspace workspaceId={place.workspaceId} name={place.workspaceName} />
-    case 'new':
+    case 'new': {
+      const pending = read(pendingLaunch)
+      if (pending?.workspaceId === reference.workspaceId && pending.change === reference.change
+        && change.commands.some(({ name }) => name === pending.command)) {
+        return <LaunchPicker workspace={place.workspaceName} />
+      }
       return (
         <Row gap="xs" wrap>
           {change.commands.map((command) => (
@@ -482,6 +529,7 @@ function Actions({ reference, change }: { reference: ChangeRef; change: ChangeCa
           ))}
         </Row>
       )
+    }
     case 'none':
       return null
   }

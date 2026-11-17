@@ -4,6 +4,7 @@ import type { BoardSnapshot, Spend } from './protocol'
 
 const BOARD: BoardSnapshot = {
   workspaceId: 'w1',
+  launchOptions: [{ id: 'claude', label: 'Claude' }, { id: 'codex', label: 'Codex' }],
   problems: [],
   spendEnabled: false,
   pullRequestsPending: false,
@@ -121,7 +122,7 @@ function hostWith(applied: unknown[], state = 'waiting', taskText = '1.2 wire it
       },
       'change.start': (input) => {
         applied.push(input)
-        return { started: true, message: 'Created PROJ-4; claude got /close PROJ-4' }
+        return { started: true, message: 'Created PROJ-4; Codex got /close PROJ-4' }
       },
       'task.run': (input) => {
         applied.push(input)
@@ -217,8 +218,29 @@ test('a merged change with open tasks says so and finishes in a new workspace of
   assert.ok(view.find({ text: 'Merged, tasks open' }))
   assert.ok(view.find({ text: /2 tasks are not ticked/ }))
   await view.press({ text: 'Finish in new PROJ-4' })
-  assert.deepEqual(applied, [{ workspaceId: 'w1', change: 'proj-4-shipped', command: 'finish' }])
-  assert.ok(view.find({ text: 'Created PROJ-4; claude got /close PROJ-4' }))
+  assert.deepEqual(applied, [])
+  assert.equal(view.find({ text: 'Start agent' })?.disabled, true)
+  await view.select({ label: 'Agent for PROJ-4' }, 'codex')
+  await view.press({ text: 'Start agent' })
+  assert.deepEqual(applied, [{ workspaceId: 'w1', change: 'proj-4-shipped', command: 'finish', launchId: 'codex' }])
+  assert.ok(view.find({ text: 'Created PROJ-4; Codex got /close PROJ-4' }))
+  await view.unmount()
+})
+
+test('Apply opens an agent chooser and cancelling does not launch', async () => {
+  const applied: unknown[] = []
+  const board: BoardSnapshot = {
+    ...BOARD,
+    changes: BOARD.changes.map((card) => card.name === 'proj-5-old'
+      ? { ...card, place: { kind: 'new', workspaceName: 'PROJ-5' } }
+      : card)
+  }
+  const view = await mount(panel, { host: hostWith(applied, 'waiting', '1.2 wire it', board) })
+  await view.press({ text: 'Apply in new PROJ-5' })
+  assert.ok(view.find({ label: 'Agent for PROJ-5' }))
+  await view.press({ text: 'Cancel' })
+  assert.equal(view.find({ label: 'Agent for PROJ-5' }), null)
+  assert.deepEqual(applied, [])
   await view.unmount()
 })
 
